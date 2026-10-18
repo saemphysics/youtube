@@ -148,3 +148,66 @@ replaced with a preset.
 The pipeline does not include a built-in provider. If none is configured,
 generation stops with an explicit error; there is no canned narration or
 success-shaped fallback.
+
+## Generate a ten-video YouTube batch
+
+Use `generate_video_batch.py` when you want a set of videos from your own
+physics requests. Create a UTF-8 text file with exactly ten non-empty lines,
+one complete free-form request per line. Include both concept explanations
+and worked-problem requests in the mix you want. The first five lines become
+horizontal 3-minute videos; the last five become vertical 1-minute videos.
+The renderer adds a five-second closing card, so narration is planned for
+2:55 in each horizontal video and 0:55 in each vertical video.
+The batch tool does not invent or substitute topics for you.
+
+Example request-file shape (replace each line with your own request):
+
+```text
+Explain the physics concept or problem I want for video 1, including the audience and goal.
+Explain the physics concept or problem I want for video 2, including assumptions and units.
+Explain the physics concept or problem I want for video 3, including a visual reasoning idea.
+Explain the physics concept or problem I want for video 4, including what the viewer should learn.
+Explain the physics concept or problem I want for video 5, including a worked example if useful.
+Explain the physics concept or problem I want for video 6 in a focused one-minute format.
+Explain the physics concept or problem I want for video 7 in a focused one-minute format.
+Explain the physics concept or problem I want for video 8 in a focused one-minute format.
+Explain the physics concept or problem I want for video 9 in a focused one-minute format.
+Explain the physics concept or problem I want for video 10 in a focused one-minute format.
+```
+
+Run plan generation and validate the renderer CSV without rendering videos:
+
+```sh
+python generate_video_batch.py \
+  --input my_physics_requests.txt \
+  --output-dir generated/my-physics-series \
+  --dry-run
+```
+
+This still calls your configured provider ten times to generate and validate
+the plans. It writes one inspectable JSON plan per request under
+`generated/my-physics-series/plans/`, plus a combined renderer CSV. Review
+those plans and the dry-run output before rendering. To render the batch:
+
+```sh
+python generate_video_batch.py \
+  --input my_physics_requests.txt \
+  --output-dir generated/my-physics-series \
+  --render
+```
+
+Rendering requires the repository's media dependencies, including
+`espeak-ng`, `ffmpeg`, and the configured Manim environment. The batch uses
+the offline eSpeak backend to fit narration to the requested duration; if the
+narration is much too short or too long for that timing, synthesis reports an
+error rather than silently changing the target. You can regenerate after
+asking for narration paced to the requested duration. The five landscape and
+five portrait format constraints are checked against every provider-generated
+plan before the CSV is written.
+
+The batch's editorial direction asks for original first-principles
+explanations, intuitive physical analogies, and elegant, readable visuals.
+It does not reproduce a named educator's distinctive style, voice, or
+signature scenes. Make each request your own: specify the concept/problem,
+audience, assumptions, numerical checks, language, and what the viewer
+should understand.
