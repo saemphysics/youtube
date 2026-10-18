@@ -1,5 +1,5 @@
 source_id,relative_path,status,review_scope,notes
-feynman_vol1,book/V1- The Feynman Lectures on Physics, Volume 1_ Mainly Mechanics.docx,incomplete,none,File is 2 bytes and is not a valid DOCX; no concepts have been attributed to it.
+feynman_vol1,book/V1- The Feynman Lectures on Physics Volume 1_ Mainly Mechanics.docx,incomplete,none,File is 2 bytes and is not a valid DOCX; no concepts have been attributed to it.
 feynman_vol2,book/v2  - feynmann vol 2  physics.docx,readable,chapter headings and high-level concept mapping,Volume II source headings include vector-field calculus and electromagnetism.
 feynman_vol3,book/V3- Feynman Lectures vol 3 on Quantum Mechanics 3.docx,readable,chapter headings and high-level concept mapping,Volume III source headings include probability amplitudes and the Hamiltonian matrix.
 feynman_computation,book/Feynmann computation.PDF,needs_review,selected summary pages only,13-page summary of Feynman's computation lectures with chapters on instruction sets, state machines, computability, information, and reversible computation; it is treated as a retrieval source for conceptual framing, not as a fully reviewed textbook or page-verified reference.
