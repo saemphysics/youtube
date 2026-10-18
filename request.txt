@@ -1,0 +1,32 @@
+Generate exactly 10 linear educational artifacts. Do NOT generate multiple-choice quiz options. 
+
+5 CONCEPT VIDEOS (Feynman analogy first, then mathematical breakdown):
+1. Derivative of position as velocity: Use domain 'calculus'. Visual primitive: 'graph'. Beat flow: 'hook' -> 'analogy' -> 'law' -> 'punchline'.
+2. Matrix transformations on basis vectors: Use domain 'linear_algebra'. Visual primitive: 'vector'. Beat flow: 'hook' -> 'analogy' -> 'law' -> 'punchline'.
+3. Wave interference and phase alignment: Use domain 'waves'. Visual primitive: 'two_source_waves'. Beat flow: 'hook' -> 'analogy' -> 'law' -> 'punchline'.
+4. Fluid continuity in a narrow pipe: Use domain 'fluids'. Visual primitive: 'pipe_with_gauge'. Beat flow: 'hook' -> 'analogy' -> 'law' -> 'punchline'.
+5. Vector field divergence and curl: Use domain 'vector_calculus'. Visual primitive: 'stream_field'. Beat flow: 'hook' -> 'analogy' -> 'law' -> 'punchline'.
+
+5 PROBLEM VIDEOS (Step-by-step solution with unit checks):
+6. Projectile motion with angle: Use domain 'mechanics' and operation 'projectile_trajectory'. Visual primitive: 'projectile_motion'. Beat flow: 'hook' -> 'experiment' -> 'law' -> 'midpoint' -> 'punchline'.
+7. Block on an inclined plane with friction: Use domain 'mechanics'. Visual primitive: 'vector'. Beat flow: 'hook' -> 'experiment' -> 'law' -> 'midpoint' -> 'punchline'.
+8. Two-block momentum collision: Use domain 'mechanics' and operation 'momentum' / 'kinetic_energy'. Visual primitive: 'particle'. Beat flow: 'hook' -> 'experiment' -> 'law' -> 'midpoint' -> 'punchline'.
+9. Simple pendulum small angle: Use domain 'differential_equations'. Visual primitive: 'pendulum'. Beat flow: 'hook' -> 'experiment' -> 'law' -> 'midpoint' -> 'punchline'.
+10. Charged particle in magnetic field: Use domain 'electrodynamics'. Visual primitive: 'orbit'. Beat flow: 'hook' -> 'experiment' -> 'law' -> 'midpoint' -> 'punchline'.
+
+CRITICAL RENDERER CONSTRAINTS:
+- Every artifact MUST have a 'beats' array. Only use these exact beat types: 'hook', 'promise', 'analogy', 'law', 'emphasis', 'experiment', 'midpoint', 'punchline'.
+- Every artifact MUST have a 'visuals' array. Only use these exact visual primitives: 'graph', 'vector', 'line', 'arc', 'wave', 'pendulum', 'projectile_motion', 'field', 'charge', 'orbit', 'spring', 'shape', 'text', 'equation_morph', 'numerical_chain', 'live_label', 'two_source_waves', 'pipe_with_gauge', 'stream_field', 'particle'.
+- FEYNMAN STYLE: Every 'analogy' beat must use simple, intuitive language before the 'law' beat introduces the math.
+- 3B1B STYLE: The narration must explicitly describe the visual morphing (e.g., "Watch how the derivative vector aligns with the slope").
+
+CRITICAL AUDIO CONSTRAINTS:
+- Every artifact MUST include an 'audio' JSON object. 
+- Inside 'audio', set: "voice_reference": "saem_voice_sample.wav", "ambient": {"kind": "none"}, "speed": 1.0, "temperature": 0.65.
+- The 'audio_script' (narration) must be calm, clear, and include a brief numerical example for the problem videos.
+
+CRITICAL ENGINE CONSTRAINTS:
+- When generating equations for the math engine, use ONLY the variables 'x' and 't'.
+- Use ONLY these math functions: abs, cos, exp, log, sin, sqrt, tan.
+- All masses, speeds, and time-steps (dt) MUST be strictly positive. Do not divide by zero.
+- All artifact_ids must be lowercase alphanumeric with underscores (e.g., 'derivative_concept').
