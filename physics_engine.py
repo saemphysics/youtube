@@ -79,17 +79,21 @@ def integrate_rk4(
     times = [0.0]
     states = [state.copy()]
     time = 0.0
+
+    def evaluate_derivative(at_time: float, at_state: np.ndarray) -> np.ndarray:
+        value = np.asarray(derivative(at_time, at_state), dtype=np.float64)
+        if value.shape != at_state.shape:
+            raise ValueError("derivative must return a vector matching state")
+        if not np.all(np.isfinite(value)):
+            raise FloatingPointError("derivative produced a non-finite value")
+        return value
+
     while time < duration:
         step = min(dt, duration - time)
-        k1 = np.asarray(derivative(time, state), dtype=np.float64)
-        k2 = np.asarray(derivative(time + step / 2, state + step * k1 / 2),
-                        dtype=np.float64)
-        k3 = np.asarray(derivative(time + step / 2, state + step * k2 / 2),
-                        dtype=np.float64)
-        k4 = np.asarray(derivative(time + step, state + step * k3),
-                        dtype=np.float64)
-        if any(k.shape != state.shape for k in (k1, k2, k3, k4)):
-            raise ValueError("derivative must return a vector matching state")
+        k1 = evaluate_derivative(time, state)
+        k2 = evaluate_derivative(time + step / 2, state + step * k1 / 2)
+        k3 = evaluate_derivative(time + step / 2, state + step * k2 / 2)
+        k4 = evaluate_derivative(time + step, state + step * k3)
 
         state = state + (step / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
         if not np.all(np.isfinite(state)):
@@ -197,8 +201,11 @@ class MechanicsEngine:
         )
         if not all(np.isfinite(value) for value in (speed, angle_deg, dt, gravity, max_time)):
             raise ValueError("projectile parameters must be finite")
-        if speed < 0 or gravity <= 0 or dt <= 0 or max_time <= 0:
-            raise ValueError("speed must be non-negative; gravity, dt, and max_time must be positive")
+        if speed < 0 or gravity <= 0 or dt <= 0 or max_time < 0:
+            raise ValueError(
+                "speed must be non-negative; gravity and dt must be positive; "
+                "max_time must be non-negative"
+            )
         theta = np.deg2rad(angle_deg)
         vx, vy = speed * np.cos(theta), speed * np.sin(theta)
         flight_time = max(0.0, 2.0 * vy / gravity)
@@ -388,6 +395,8 @@ class ElectrostaticsEngine:
 
         field = np.zeros(3, dtype=np.float64)
         for charge_position, charge in zip(pos, q):
+            if charge == 0.0:
+                continue
             delta = p - charge_position
             radius_sq = np.dot(delta, delta)
             if radius_sq < 1e-12:

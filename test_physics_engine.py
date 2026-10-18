@@ -99,6 +99,13 @@ def test_rk4_rejects_invalid_time_steps(duration, dt):
         integrate_rk4(lambda _time, state: state, [1.0], duration, dt)
 
 
+def test_rk4_validates_each_derivative_result_before_next_stage():
+    with pytest.raises(ValueError, match="matching state"):
+        integrate_rk4(lambda _time, _state: np.array([1.0, 2.0]), [1.0], 0.1, 0.1)
+    with pytest.raises(FloatingPointError, match="derivative"):
+        integrate_rk4(lambda _time, _state: np.array([np.nan]), [1.0], 0.1, 0.1)
+
+
 def test_calculus_engine_derivative_and_integral_are_consistent():
     values = np.linspace(0.0, 2.0, 101)
     derivative = CalculusEngine.derivative(np.sin, values)
@@ -130,6 +137,18 @@ def test_mechanics_and_kinematics_engines_model_motion():
     assert trajectory[-1][1] <= 0.0
     assert trajectory[-1][1] == pytest.approx(0.0)
     assert trajectory[-1][0] == pytest.approx(100.0 / 9.81, rel=1e-3)
+    assert MechanicsEngine.projectile_trajectory(
+        10.0, 45.0, 0.1, max_time=0.0,
+    ) == [(0.0, 0.0)]
+
+
+def test_zero_charge_at_observation_point_does_not_create_singularity():
+    field = ElectrostaticsEngine.electric_field(
+        positions=[[0.0, 0.0, 0.0]],
+        charges=[0.0],
+        point=[0.0, 0.0, 0.0],
+    )
+    assert field == pytest.approx([0.0, 0.0, 0.0])
 
 
 def test_electrostatics_magnetics_waves_and_fluids_engines_produce_fields():

@@ -120,3 +120,33 @@ a time. Keep equations short enough to read on a phone.
    The batch runner adds a 5-second closing card after voice duration, so
    narration word count is only an estimate; confirm the final MP4 duration
    after synthesis and adjust the script or TTS speed if needed.
+
+## Matrix-guided requested batches
+
+`book_sources.csv` records which local references could be inspected and
+their review scope. `knowledge_matrix.csv` links original concept labels and
+keywords to those sources, the authored lesson IDs, and every domain in
+`EngineCatalog`. The matrix is a curated index, not a full-text copy of the
+books or a claim that every topic has a working solver.
+
+Request an original, already-authored lesson by topic:
+
+```sh
+python generate_requested_csv.py --topic "eigenvectors" --orientation both --seed 2026
+python schema_validator.py content_batch_vertical.csv
+```
+
+The generator matches topic words to reviewed matrix vocabulary and samples
+only among linked, authored lessons. `--seed` makes that choice repeatable.
+The normalized match weights are recommendation weights, not calibrated
+probabilities; this index is not a trained language model and does not invent
+scripts or silently run every solver. If a concept has no authored lesson, the
+request fails and needs a new reviewed lesson first. Outputs retain this
+project's render-ready CSV schema; select the intended orientation and copy it
+to `content_batch.csv` before rendering, as in the production sequence above.
+
+The matrix source ledger flags the supplied Volume I DOCX as incomplete (2
+bytes); no knowledge is attributed to that file. Matrix links describe
+high-level concept relationships using source headings and course-level
+references, not copied book text. The supplied 18.001 PDF is recorded at the
+course level pending exact edition/section verification.

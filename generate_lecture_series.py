@@ -348,23 +348,43 @@ def _beats(types: list[str]) -> list[dict[str, str]]:
     ]
 
 
-def export(output_dir: Path) -> dict[str, Path]:
+def _load_plan() -> list[dict[str, str]]:
     with PLAN.open(encoding="utf-8", newline="") as stream:
         plan = list(csv.DictReader(stream))
     if len(plan) != 10 or len({row["lesson_id"] for row in plan}) != 10:
         raise ValueError("lesson plan must contain exactly 10 unique lesson IDs")
     if set(row["lesson_id"] for row in plan) != set(SCRIPTS):
         raise ValueError("plan lesson IDs must match the authored script IDs")
+    return plan
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    outputs: dict[str, Path] = {}
-    for orientation in ("horizontal", "vertical"):
-        rows = []
-        for lesson in plan:
-            lesson_id = lesson["lesson_id"]
-            content = SCRIPTS[lesson_id]
-            visual = content["visual"]
-            rows.append({
+
+def _select_lessons(
+    plan: list[dict[str, str]],
+    lesson_ids: list[str] | tuple[str, ...] | None,
+) -> list[dict[str, str]]:
+    if lesson_ids is None:
+        return plan
+    if not lesson_ids or len(set(lesson_ids)) != len(lesson_ids):
+        raise ValueError("selected lesson IDs must be a non-empty unique list")
+    lessons_by_id = {lesson["lesson_id"]: lesson for lesson in plan}
+    missing = set(lesson_ids) - set(lessons_by_id)
+    if missing:
+        raise ValueError(f"unknown lesson IDs: {', '.join(sorted(missing))}")
+    return [lessons_by_id[lesson_id] for lesson_id in lesson_ids]
+
+
+def _build_rows(
+    lessons: list[dict[str, str]],
+    orientation: str,
+) -> list[dict[str, str]]:
+    if orientation not in {"horizontal", "vertical"}:
+        raise ValueError("orientation must be horizontal or vertical")
+    rows = []
+    for lesson in lessons:
+        lesson_id = lesson["lesson_id"]
+        content = SCRIPTS[lesson_id]
+        visual = content["visual"]
+        rows.append({
                 "video_id": f"{lesson_id}_{orientation}",
                 "concept_type": "GENERIC",
                 "header_title": lesson["lesson_title"],
@@ -394,18 +414,46 @@ def export(output_dir: Path) -> dict[str, Path]:
                 "platform": "youtube" if orientation == "horizontal" else "shorts",
                 "lesson_id": lesson_id,
             })
+    return rows
+
+
+def _write_rows(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=FIELDS,
+            extrasaction="ignore",
+            lineterminator="\n",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def export(
+    output_dir: Path,
+    lesson_ids: list[str] | tuple[str, ...] | None = None,
+) -> dict[str, Path]:
+    """Export all lessons, or a requested selection, in both orientations."""
+    plan = _select_lessons(_load_plan(), lesson_ids)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    outputs: dict[str, Path] = {}
+    for orientation in ("horizontal", "vertical"):
         path = output_dir / f"content_batch_{orientation}.csv"
-        with path.open("w", encoding="utf-8", newline="") as stream:
-            writer = csv.DictWriter(
-                stream,
-                fieldnames=FIELDS,
-                extrasaction="ignore",
-                lineterminator="\n",
-            )
-            writer.writeheader()
-            writer.writerows(rows)
+        _write_rows(path, _build_rows(plan, orientation))
         outputs[orientation] = path
     return outputs
+
+
+def export_one(
+    output_path: Path,
+    orientation: str,
+    lesson_ids: list[str] | tuple[str, ...],
+) -> Path:
+    """Write selected authored lessons to one existing render-schema CSV."""
+    plan = _select_lessons(_load_plan(), lesson_ids)
+    _write_rows(output_path, _build_rows(plan, orientation))
+    return output_path
 
 
 def main() -> None:

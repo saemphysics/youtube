@@ -1,0 +1,9 @@
+source_id,relative_path,status,review_scope,notes
+feynman_vol1,book/V1- The Feynman Lectures on Physics, Volume 1_ Mainly Mechanics.docx,incomplete,none,File is 2 bytes and is not a valid DOCX; no concepts have been attributed to it.
+feynman_vol2,book/v2  - feynmann vol 2  physics.docx,readable,chapter headings and high-level concept mapping,Volume II source headings include vector-field calculus and electromagnetism.
+feynman_vol3,book/V3- Feynman Lectures vol 3 on Quantum Mechanics 3.docx,readable,chapter headings and high-level concept mapping,Volume III source headings include probability amplitudes and the Hamiltonian matrix.
+feynman_computation,book/computation-Richard_P._Feynman-Feynman_Lectures_on_Computation__-Addison-Wesley(1996).docx,readable,book-level concept mapping,Computing concepts are mapped only to currently supported engine capabilities.
+feynman_qed,book/QED_ The Strange Theory of Light and Matter by Feynman.docx,readable,book-level concept mapping,Used for high-level connections among light matter and quantum amplitudes.
+strang_cse,book/Gilbert Strang MIT Computational Science and Engineering (1).docx,readable,chapter headings and high-level concept mapping,M.I.T. 18.085 Computational Science and Engineering I; headings identify applied linear algebra Fourier series and finite-difference methods.
+strang_calculus,book/mitres_18_001_gilbert strang.pdf,readable,course-level reference,Filename identifies MIT 18.001; confirm exact edition and section locators before adding chapter-level citations.
+sicp,book/SCIP MIT.docx,readable,book-level concept mapping,Computing/programming context only; not treated as a physics solver source.
