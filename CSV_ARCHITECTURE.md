@@ -148,5 +148,31 @@ to `content_batch.csv` before rendering, as in the production sequence above.
 The matrix source ledger flags the supplied Volume I DOCX as incomplete (2
 bytes); no knowledge is attributed to that file. Matrix links describe
 high-level concept relationships using source headings and course-level
-references, not copied book text. The supplied 18.001 PDF is recorded at the
-course level pending exact edition/section verification.
+references, not copied book text. The local Strang Calculus PDF identifies the
+Third Edition; its chapter 12.3 and 12.4 headings support the reviewed
+curvature, circular-motion, and polar-coordinate links. The incomplete
+Feynman Volume I file is not used to claim mechanics coverage.
+
+## Exam-problem matrix and explanation batches
+
+`problem_matrix.csv` indexes individually reviewed Physics questions by
+source, printed question number, PDF page, and `knowledge_matrix.csv` concept
+ID. It stores paraphrased prompts and checked solution summaries rather than
+copied exam text. `problem_matrix.py` rejects stale source/concept links, and
+`generate_problem_csv.py` emits render-ready explanation rows in the existing
+schema:
+
+```sh
+python generate_problem_csv.py --orientation both
+python schema_validator.py problem_batch_vertical.csv
+python schema_validator.py problem_batch_horizontal.csv
+```
+
+The curated set currently includes verified circular-motion, instantaneous
+power, lens-power, and magnetic-flux problems. The two optics/electromagnetism
+rows link to reviewed Feynman concept sources through the knowledge matrix;
+the calculus relationships link to Strang Calculus where applicable. PDFs
+that are image-only, have an unreliable text layer, or have not yet had their
+Physics sections reviewed remain catalogued but are not used for generated
+content. Video scripts and visualizations are original and use this project's
+primitives; they are not copies of any creator's script or signature scenes.

@@ -5,5 +5,15 @@ feynman_vol3,book/V3- Feynman Lectures vol 3 on Quantum Mechanics 3.docx,readabl
 feynman_computation,book/computation-Richard_P._Feynman-Feynman_Lectures_on_Computation__-Addison-Wesley(1996).docx,readable,book-level concept mapping,Computing concepts are mapped only to currently supported engine capabilities.
 feynman_qed,book/QED_ The Strange Theory of Light and Matter by Feynman.docx,readable,book-level concept mapping,Used for high-level connections among light matter and quantum amplitudes.
 strang_cse,book/Gilbert Strang MIT Computational Science and Engineering (1).docx,readable,chapter headings and high-level concept mapping,M.I.T. 18.085 Computational Science and Engineering I; headings identify applied linear algebra Fourier series and finite-difference methods.
-strang_calculus,book/mitres_18_001_gilbert strang.pdf,readable,course-level reference,Filename identifies MIT 18.001; confirm exact edition and section locators before adding chapter-level citations.
+strang_calculus,book/mitres_18_001_gilbert strang.pdf,readable,third edition contents and selected calculus sections,The PDF identifies Gilbert Strang's Calculus Third Edition; chapter 12.3 covers curvature and normal vectors and 12.4 covers polar coordinates and planetary motion. Use only where the calculus connection is explicit.
 sicp,book/SCIP MIT.docx,readable,book-level concept mapping,Computing/programming context only; not treated as a physics solver source.
+neet_2016_resonance,book/reso-2016- neet - solution.pdf,readable,source inventory only,Extractable solution PDF; physics problems have not been individually reviewed or indexed.
+neet_2017,book/que_1733486964.pdf,readable,source inventory only,2017 mixed-subject NEET paper and solutions; physics problems have not been individually reviewed or indexed.
+neet_2018,book/que_1733486975.pdf,readable,source inventory only,2018 mixed-subject NEET paper and solutions; physics problems have not been individually reviewed or indexed.
+neet_2019,book/que_1733486986.pdf,readable,source inventory only,2019 mixed-subject NEET paper and solutions; physics problems have not been individually reviewed or indexed.
+neet_2020,book/que_1733486997.pdf,readable,source inventory only,2020 mixed-subject NEET paper and solutions; physics problems have not been individually reviewed or indexed.
+neet_2021_mixed,book/que_1733487016.pdf,readable,source inventory only,2021 mixed-subject NEET paper and solutions; physics problems have not been individually reviewed or indexed.
+neet_2021_physics_p2,NEET 2021 - Physics_With_Solution_P2_H.pdf,needs_text_review,none,Physics-only Hindi solution PDF has an unreliable legacy-font text layer; no concepts have been attributed to it.
+neet_2022,book/NEET 2022 - Physics _ Final _ Code T3.pdf,readable,selected Physics problems and answer explanations,Physics questions 2 and 6 were checked on pages 3-5 and paraphrased for original explanations.
+neet_2023,book/NEET 2023.pdf,needs_ocr,none,Image-only PDF with no extractable text; no concepts have been attributed pending OCR and review.
+neet_2024,NEET 2024.pdf,readable,selected Physics problems and answer explanations,Physics questions 1 and 10 were checked on pages 2 and 4 and paraphrased for original explanations.
