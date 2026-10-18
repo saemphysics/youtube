@@ -1,4 +1,4 @@
-# requirements.txt v2.3.1 — Pinned for stable CI cache + CPU runners
+# requirements.txt v2.4.0 — Bugs fixed + Gemini AI & Soundfile added
 # This file is hashed for GitHub Actions cache key: ${{ hashFiles('requirements.txt') }}
 # Install order in workflow:
 #   1. torch + torchaudio from https://download.pytorch.org/whl/cpu
@@ -27,18 +27,15 @@ packaging==24.0
 
 # --- Text normalization (text_normalizer.py) ---
 # stdlib only (re, unicodedata, functools) — no extra deps
-# If you add Hinglish: indic-nlp-library==0.91
 
 # --- Validation & utils ---
 # schema_validator.py is stdlib only (csv, json, os, re, sys)
 # batch_runner.py needs ffmpeg via apt, not pip
-pypdf==6.21.1
-scipy>=1.15.0
+pypdf>=4.2.0                 # FIXED: 6.21.1 exist nahi karta tha
+soundfile>=0.12.1            # ADDED: Audio WAV files save/load karne ke liye
+google-generativeai>=0.7.0   # ADDED: Gemini Provider ke liye
 tqdm==4.66.2
-
-# --- Optional: For future LLM content gen (Layer 2) ---
-# openai==1.30.0  # Uncomment when you enable GPT script generation
-# anthropic==0.27.0
+# scipy>=1.15.0              # REMOVED: Upar 1.12.0 hai, isliye isko hata diya taaki conflict na ho
 
 # --- Dev / CI ---
 pytest==8.2.0
