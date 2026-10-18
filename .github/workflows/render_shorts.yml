@@ -1,339 +1,46 @@
-name: Render Physics Shorts
+name: Validate Request-Driven Pipeline
 
 on:
   push:
     branches: [main]
     paths:
-      - "content_batch.csv"
-      - "generate_csv.py"
-      - "generate_audio.py"
-      - "render_universal.py"
-      - "batch_runner.py"
-      - "schema_validator.py"
-      - "requirements.txt"
+      - "*.py"
+      - "*.csv"
       - ".github/workflows/render_shorts.yml"
+      - "requirements.txt"
+  pull_request:
+    paths:
+      - "*.py"
+      - "*.csv"
+      - ".github/workflows/render_shorts.yml"
+      - "requirements.txt"
   workflow_dispatch:
-    inputs:
-      only:
-        description: "Comma-separated video_ids to render (blank = all)"
-        required: false
-        default: ""
-      orientation:
-        description: "vertical | horizontal (blank = use CSV value, mixed = allow both)"
-        required: false
-        default: ""
-      quality:
-        description: "draft | 720p | 1080p | 4k"
-        required: false
-        default: "1080p"
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  PYTHONUNBUFFERED: "1"
-  PIP_DISABLE_PIP_VERSION_CHECK: "1"
-  COQUI_TOS_AGREED: "1"
-  HF_HOME: ${{ github.workspace }}/.hf_cache
-  INPUT_ORIENTATION: ${{ inputs.orientation || '' }}
-  INPUT_QUALITY: ${{ inputs.quality || '1080p' }}
-  INPUT_ONLY: ${{ inputs.only || '' }}
-
 jobs:
-  # ========================================================== validate
-  validate:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      row_count: ${{ steps.count.outputs.rows }}
-      video_ids: ${{ steps.count.outputs.ids }}
-      orientation: ${{ steps.orient.outputs.value }}
-      quality: ${{ steps.orient.outputs.quality }}
-      only: ${{ steps.orient.outputs.only }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Inspect CSV header and rows
+      - name: Install test dependencies
         run: |
-          echo "::group::CSV header"
-          head -1 content_batch.csv
-          echo "::endgroup::"
-          echo "::group::Row summary"
-          python3 - <<'PY'
-          import csv
-          with open("content_batch.csv", newline="", encoding="utf-8") as f:
-              reader = csv.DictReader(f)
-              rows = list(reader)
-          print(f"Columns: {len(reader.fieldnames or [])}")
-          print(f"Rows:    {len(rows)}")
-          for i, row in enumerate(rows, start=2):
-              vid = row.get("video_id", "<blank>") or "<blank>"
-              orient = row.get("orientation", "<missing>") or "<missing>"
-              print(f"  row {i:02d}  {vid:50s}  orientation={orient}")
-          PY
-          echo "::endgroup::"
-
-      - name: Extract row count and video IDs
-        id: count
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import csv
-          with open("content_batch.csv", newline="", encoding="utf-8") as f:
-              rows = list(csv.DictReader(f))
-          ids = ",".join(r.get("video_id", "") for r in rows)
-          print(f"rows={len(rows)}")
-          print(f"ids={ids}")
-          PY
-
-      - name: Confirm orientation agreement
-        id: orient
-        run: |
-          python3 - <<'PY'
-          import csv, os, sys
-          rows = list(csv.DictReader(open("content_batch.csv", newline="", encoding="utf-8")))
-          if not rows:
-              sys.exit("::error::CSV has no data rows")
-          csv_orients = {(r.get("orientation") or "vertical").lower() for r in rows}
-          if len(csv_orients) > 1:
-              print(f"::notice::CSV has mixed orientations: {csv_orients} — both vertical+horizontal batch (20 rows)")
-              csv_orient = "mixed"
-          else:
-              csv_orient = csv_orients.pop()
-          env_orient = (os.environ.get("INPUT_ORIENTATION") or "").lower().strip()
-          if env_orient:
-              if env_orient not in ("vertical", "horizontal", "mixed"):
-                  sys.exit(f"::error::Invalid orientation input: {env_orient}")
-              if csv_orient != "mixed" and env_orient != csv_orient:
-                  print(f"::warning::Override: workflow={env_orient} CSV={csv_orient} (using workflow value)")
-              final_orient = env_orient
-          else:
-              final_orient = csv_orient if csv_orient != "mixed" else "mixed"
-          quality = (os.environ.get("INPUT_QUALITY") or "1080p").lower().strip()
-          if quality not in ("draft", "720p", "1080p", "4k"):
-              sys.exit(f"::error::Invalid quality input: {quality}")
-          only = (os.environ.get("INPUT_ONLY") or "").strip()
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"value={final_orient}\n")
-              f.write(f"quality={quality}\n")
-              f.write(f"only={only}\n")
-          PY
-
-      - name: Run schema validator
-        run: |
-          echo "::group::schema_validator.py output"
-          if ! python3 schema_validator.py content_batch.csv; then
-            echo "::error file=content_batch.csv,title=Schema validation failed::See group above for details"
-            echo "::endgroup::"
-            exit 1
-          fi
-          echo "::endgroup::"
-
-      - name: Notify success
-        run: |
-          echo "::notice title=Validation OK::${{ steps.count.outputs.rows }} rows ready to render (orientation=${{ steps.orient.outputs.value }}, quality=${{ steps.orient.outputs.quality }})"
-
-  # ========================================================== render (4-way shard)
-  render:
-    needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
-    env:
-      SAEM_ORIENTATION: ${{ needs.validate.outputs.orientation }}
-      SAEM_QUALITY: ${{ needs.validate.outputs.quality }}
-      SAEM_ONLY: ${{ needs.validate.outputs.only }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install system dependencies
-        run: |
-          echo "::group::apt-get install"
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            ffmpeg \
-            texlive-latex-base texlive-latex-recommended \
-            texlive-latex-extra texlive-science \
-            texlive-fonts-recommended dvisvgm \
-            libcairo2-dev libpango1.0-dev libsndfile1 \
-            build-essential pkg-config
-          echo "::endgroup::"
-
-      - name: Cache pip + HF model weights
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            ${{ github.workspace }}/.hf_cache
-          key: ${{ runner.os }}-py311-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-py311-
-
-      - name: Install Python dependencies
-        run: |
-          echo "::group::pip install"
           python -m pip install --upgrade pip
-          pip install torch torchaudio \
-            --index-url https://download.pytorch.org/whl/cpu
-          pip install -r requirements.txt
-          echo "::endgroup::"
+          pip install numpy scipy pytest
 
-      - name: Check voice sample reference
+      - name: Run request-pipeline and renderer-adapter tests
         run: |
-          if [ -f saem_voice_sample.wav ]; then
-            echo "::notice::Voice reference present"
-          else
-            echo "::warning title=No voice sample::saem_voice_sample.wav is missing; falling back to manifest durations"
-          fi
-
-      - name: Render shard ${{ matrix.shard }} of ${{ strategy.job-total }}
-        id: render
-        run: |
-          echo "::group::batch_runner.py shard ${{ matrix.shard }}"
-          set +e
-          if [ -n "${SAEM_ONLY}" ]; then
-            python3 batch_runner.py \
-              --chunk ${{ matrix.shard }} \
-              --total-chunks ${{ strategy.job-total }} \
-              --retries 2 \
-              --only "${SAEM_ONLY}" \
-              --log-file "output_shorts/runlog_shard_${{ matrix.shard }}.json"
-          else
-            python3 batch_runner.py \
-              --chunk ${{ matrix.shard }} \
-              --total-chunks ${{ strategy.job-total }} \
-              --retries 2 \
-              --log-file "output_shorts/runlog_shard_${{ matrix.shard }}.json"
-          fi
-          rc=$?
-          set -e
-          echo "::endgroup::"
-          exit $rc
-
-      - name: Count rendered videos
-        id: tally
-        if: always()
-        run: |
-          COUNT=$(find output_shorts -maxdepth 1 -name '*_final.mp4' 2>/dev/null | wc -l)
-          echo "count=${COUNT}" >> "$GITHUB_OUTPUT"
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: shard-${{ matrix.shard }}
-          path: |
-            output_shorts/*.mp4
-            output_shorts/*.json
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: Job summary for shard ${{ matrix.shard }}
-        if: always()
-        run: |
-          SHARD=${{ matrix.shard }}
-          COUNT=${{ steps.tally.outputs.count }}
-          ORIENT=${{ needs.validate.outputs.orientation }}
-          QUALITY=${{ needs.validate.outputs.quality }}
-          {
-            echo "### Shard ${SHARD} — summary"
-            echo ""
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| Orientation | \`${ORIENT}\` |"
-            echo "| Quality | \`${QUALITY}\` |"
-            echo "| Rendered MP4s | ${COUNT} |"
-            echo "| Runlog | \`output_shorts/runlog_shard_${SHARD}.json\` |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  # ========================================================== merge
-  merge_artifacts:
-    needs: [validate, render]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    if: ${{ always() && needs.render.result != 'skipped' }}
-    steps:
-      - name: Download all shard artifacts
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          path: merged_output
-
-      - name: Flatten artifacts
-        run: |
-          echo "::group::Flatten"
-          mkdir -p final_output
-          if [ -d merged_output ]; then
-            find merged_output -name "*.mp4" -exec cp {} final_output/ \;
-            find merged_output -name "*.json" -exec cp {} final_output/ \;
-          fi
-          echo "::endgroup::"
-
-      - name: Tally final output
-        id: final
-        run: |
-          MP4S=$(find final_output -name "*.mp4" 2>/dev/null | wc -l)
-          SIZE=$(du -sh final_output 2>/dev/null | awk '{print $1}')
-          SIZE=${SIZE:-0}
-          echo "mp4s=${MP4S}" >> "$GITHUB_OUTPUT"
-          echo "size=${SIZE}" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Final tally::${MP4S} MP4s, ${SIZE} total"
-
-      - name: Upload merged bundle
-        if: ${{ steps.final.outputs.mp4s != '0' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: physics-shorts-bundle
-          path: final_output/
-          retention-days: 7
-          if-no-files-found: warn
-
-      - name: Final job summary
-        if: always()
-        run: |
-          ORIENT=${{ needs.validate.outputs.orientation }}
-          QUALITY=${{ needs.validate.outputs.quality }}
-          ROWS=${{ needs.validate.outputs.row_count }}
-          MP4S=${{ steps.final.outputs.mp4s }}
-          SIZE=${{ steps.final.outputs.size }}
-          MP4S=${MP4S:-0}
-          SIZE=${SIZE:-0}
-          {
-            echo "## Physics Shorts — Run ${{ github.run_number }}"
-            echo ""
-            echo "**Source:** Feynman Lectures Vol. I-II"
-            echo ""
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| Rows queued | ${ROWS} |"
-            echo "| Orientation | \`${ORIENT}\` |"
-            echo "| Quality | \`${QUALITY}\` |"
-            echo "| MP4s rendered | **${MP4S}** |"
-            echo "| Bundle size | ${SIZE} |"
-            echo "| Commit | \`${{ github.sha }}\` |"
-            echo "| Trigger | ${{ github.event_name }} |"
-            echo ""
-            if [ "${MP4S}" -eq 0 ]; then
-              echo "> [!WARNING]"
-              echo "> No MP4s were produced. Check the shard summaries above."
-            else
-              echo "> [!NOTE]"
-              echo "> Download the \`physics-shorts-bundle\` artifact to retrieve all videos."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          pytest -q \
+            test_request_pipeline.py \
+            test_matrix_engine.py \
+            test_problem_matrix.py \
+            test_schema_validator.py \
+            test_batch_runner.py \
+            test_physics_engine.py

@@ -1,9 +1,7 @@
-import json
-
 import numpy as np
 import pytest
 
-from narrative_engine import NarrativeEngine
+from engine_router import EngineRouter, SafeExpression
 from physics_engine import (
     AdvancedCalculusEngine,
     CalculusEngine,
@@ -200,7 +198,11 @@ def test_kinematics_and_universal_engine_reject_nonfinite_values():
     with pytest.raises(ValueError):
         UniversalEngine(default_dt=0.0)
     with pytest.raises(ValueError):
-        UniversalEngine().simulate("wave", duration=-1.0, dt=0.1)
+        UniversalEngine.execute(
+            "kinematics",
+            "constant_acceleration_position",
+            {"x0": 0.0, "v0": 0.0, "a": float("nan"), "t": 1.0},
+        )
 
 
 def test_force_driven_mechanics_tracks_time_sampled_particle_states():
@@ -347,36 +349,7 @@ def test_fluid_streamlines_and_pathlines_track_distinct_flow_models():
     assert pathline[-1] == pytest.approx([2.0, -1.0])
 
 
-def test_catalog_and_narrative_route_new_independent_engines():
-    assert EngineCatalog.resolve("advanced calculus") is AdvancedCalculusEngine
-    assert EngineCatalog.resolve("electromagnetism") is ElectrodynamicsEngine
-    assert EngineCatalog.resolve("rotation") is RotationalMechanicsEngine
-    assert {"advanced_calculus", "electrodynamics", "rotational_mechanics"}.issubset(
-        EngineCatalog.available()
-    )
-
-    fluid_plan = NarrativeEngine.topic_blueprint("vortex flow")
-    assert fluid_plan["motif"] == "streamlines expose incompressible flow around its sources and vortices"
-    assert fluid_plan["visuals"][0]["engine"] == "fluids"
-    assert "electrodynamics" in NarrativeEngine.choose_domains("electromagnetism")
-
-
-@pytest.mark.parametrize(
-    ("topic", "visual_type"),
-    [
-        ("advanced calculus derivative", "graph"),
-        ("rotational mechanics", "group"),
-        ("vortex flow", "group"),
-        ("electrodynamics", "group"),
-    ],
-)
-def test_topic_visualizations_use_renderer_supported_primitives(topic, visual_type):
-    visual_data = UniversalEngine().generate(topic)["visual_data"]
-    assert visual_data[0]["type"] == visual_type
-    json.dumps(visual_data)
-
-
-def test_domain_registry_exposes_every_engine_and_resolves_class_names():
+def test_domain_registry_exposes_every_engine_and_explicit_operations():
     names = EngineCatalog.available()
     required = {
         "calculus", "geometry", "linear_algebra", "kinematics", "mechanics",
@@ -386,125 +359,44 @@ def test_domain_registry_exposes_every_engine_and_resolves_class_names():
     assert EngineCatalog.resolve("mechanics") is MechanicsEngine
     assert EngineCatalog.resolve("waves") is WavesEngine
     assert EngineCatalog.resolve("calculus") is CalculusEngine
+    assert "derivative" in UniversalEngine.operations()["calculus"]
 
 
-def test_narrative_engine_builds_a_coherent_story_arc():
-    beats = NarrativeEngine.build_story("pendulum", ["mechanics", "calculus", "waves"])
-    assert len(beats) >= 4
-    assert beats[0].title == "setup"
-    assert all(beat.engine in {"mechanics", "calculus", "waves"} for beat in beats)
-    assert all(beat.goal for beat in beats)
+def test_explicit_engine_dispatch_matches_direct_calculus_and_matrix_operations():
+    derivative = UniversalEngine.execute(
+        "calculus",
+        "derivative",
+        {"func": {"expression": "x**2"}, "x": 3.0},
+    )
+    eigenvalues = UniversalEngine.execute(
+        "linear_algebra",
+        "eigenvalues",
+        {"matrix": [[2.0, 0.0], [0.0, 3.0]]},
+    )
+
+    assert derivative == pytest.approx(6.0)
+    assert eigenvalues == pytest.approx([3.0, 2.0])
 
 
-def test_narrative_plan_generates_topic_blueprint_and_voiceover():
-    plan = NarrativeEngine.topic_blueprint("wave interference", ["waves", "mechanics"])
-    assert plan["topic"] == "wave interference"
-    assert plan["domains"] == ["waves", "mechanics"]
-    assert plan["motif"]
-    assert len(plan["voiceover"]) >= 3
-    assert plan["scene_plan"][0]["title"] == "setup"
+def test_engine_router_rejects_unknown_operations_and_unsafe_expressions():
+    with pytest.raises(ValueError, match="unsupported operation"):
+        EngineRouter.execute("calculus", "build_episode", {})
+    for expression in ("__import__('os')", "x.real", "x + y", "x[0]"):
+        with pytest.raises(ValueError):
+            SafeExpression(expression)
 
 
-@pytest.mark.parametrize(
-    ("topic", "motif", "element"),
-    [
-        ("standing waves", "phase fronts revealing interference and nodes", "nodes and antinodes"),
-        ("electric field", "field vectors and flux tracing the source geometry", "field direction and magnitude"),
-        ("matrix transformation", "basis vectors revealing a transformation one component at a time", "transformed basis and vectors"),
-        ("orbital motion", "a tracked trajectory anchored to a visible coordinate frame", "time-evolving trajectory"),
-    ],
-)
-def test_narrative_blueprints_select_visuals_by_topic_family(topic, motif, element):
-    plan = NarrativeEngine.topic_blueprint(topic)
-
-    assert plan["motif"] == motif
-    assert any(visual["element"] == element for visual in plan["visuals"])
-
-
-def test_geometry_blueprint_and_linear_algebra_topic_routing():
-    geometry = NarrativeEngine.topic_blueprint("triangle geometry")
-    linear_algebra_domains = NarrativeEngine.choose_domains("linear algebra eigenvalues")
-
-    assert geometry["motif"] == "a geometric invariant emerges from measured shapes and transformations"
-    assert geometry["visuals"][0]["engine"] == "geometry"
-    assert linear_algebra_domains[0] == "linear_algebra"
-
-
-def test_narrative_blueprint_keeps_exact_topic_template_precedence():
-    plan = NarrativeEngine.topic_blueprint("wave interference")
-
-    assert plan["visuals"][0]["element"] == "two source rings"
-
-
-def test_vector_calculus_and_odes_support_deep_math_narratives():
-    grad = VectorCalculusEngine.gradient(lambda xy: xy[0] ** 2 + xy[1] ** 2, np.array([1.0, 2.0]))
-    assert grad.tolist() == pytest.approx([2.0, 4.0])
-
+def test_vector_calculus_and_differential_equation_engines_remain_available():
+    grad = VectorCalculusEngine.gradient(
+        lambda xy: xy[0] ** 2 + xy[1] ** 2,
+        np.array([1.0, 2.0]),
+    )
     decay = DifferentialEquationsEngine.exponential_decay(k=3.0, t=1.0)
-    assert decay == pytest.approx(np.exp(-3.0))
-
     field = VectorCalculusEngine.divergence(
         lambda xy: np.array([xy[0], xy[1]]),
         np.array([1.0, 2.0]),
     )
+
+    assert grad.tolist() == pytest.approx([2.0, 4.0])
+    assert decay == pytest.approx(np.exp(-3.0))
     assert field == pytest.approx(2.0)
-
-
-def test_episode_blueprint_has_camera_and_palette_for_film_grain():
-    episode = NarrativeEngine.build_episode("pendulum", ["mechanics", "calculus"])
-    assert episode["topic"] == "pendulum"
-    assert episode["palette"]["primary"]
-    assert episode["camera_notes"]
-    assert episode["visuals"][0]["engine"] in {"mechanics", "calculus"}
-    assert episode["core_idea"]
-    assert episode["key_equations"]
-    assert isinstance(episode["runtime_seconds"], (int, float))
-
-
-def test_universal_engine_generates_a_valid_topic_workflow():
-    engine = UniversalEngine()
-    result = engine.generate("wave interference", ["waves", "mechanics"])
-    assert result["topic"] == "wave interference"
-    assert result["domains"] == ["waves", "mechanics"]
-    assert result["scene_plan"]
-    assert result["simulator"]["type"] == "rk4"
-    assert result["intention"] == "mathematically precise and physically insightful"
-    assert result["simulator"]["wave_field"].ndim == 2
-
-
-def test_universal_engine_builds_time_sampled_fluid_pathlines():
-    result = UniversalEngine(default_dt=0.02).simulate("vortex flow", duration=0.5)
-
-    assert result["type"] == "trajectory"
-    assert result["domain"] == "fluids"
-    assert result["times"][-1] == pytest.approx(0.5)
-    assert result["positions"].shape == (len(result["times"]), 2)
-
-
-@pytest.mark.parametrize(
-    ("topic", "primitive"),
-    [
-        ("wave interference", "two_source_waves"),
-        ("traveling wave", "wave"),
-        ("pendulum", "pendulum"),
-        ("projectile motion", "projectile_motion"),
-        ("electric field", "group"),
-        ("magnetic field", "group"),
-        ("matrix transformation", "group"),
-    ],
-)
-def test_universal_engine_emits_renderer_ready_visual_data(topic, primitive):
-    result = UniversalEngine().generate(topic)
-
-    assert result["visual_data"][0]["type"] == primitive
-    json.dumps(result["visual_data"])
-
-
-def test_electric_field_animation_vectors_follow_calculated_field():
-    visual = UniversalEngine().generate("electric field")["visual_data"][0]
-    vectors = [item for item in visual["children"] if item["type"] == "vector"]
-    midpoint = next(item for item in vectors if item["start"] == [0.0, 0.0, 0.0])
-
-    assert len(vectors) > 20
-    assert midpoint["end"][0] > midpoint["start"][0]
-    assert midpoint["end"][1] == pytest.approx(midpoint["start"][1])

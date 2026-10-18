@@ -1,26 +1,31 @@
-"""Source-linked concept matrix and seeded weighted recommendations."""
+"""Knowledge-matrix retrieval and cross-domain evidence ranking."""
 from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
+from functools import lru_cache
 import math
 from pathlib import Path
-import random
 import re
+
+from pypdf import PdfReader
 
 from physics_engine import EngineCatalog
 
 ROOT = Path(__file__).resolve().parent
 MATRIX_PATH = ROOT / "knowledge_matrix.csv"
 SOURCES_PATH = ROOT / "book_sources.csv"
-PLAN_PATH = ROOT / "lecture_series_plan.csv"
 _TOKEN = re.compile(r"[a-z0-9]+")
 _STOP_WORDS = {
-    "a", "about", "an", "and", "are", "as", "at", "be", "build", "by",
-    "can", "create", "for", "from", "how", "i", "in", "into", "is", "it",
-    "make", "me", "of", "on", "or", "please", "show", "that", "the", "this",
-    "to", "use", "what", "when", "where", "which", "why", "with",
+    "a", "about", "an", "and", "are", "as", "at", "be", "by", "can",
+    "create", "for", "from", "how", "i", "in", "into", "is", "it", "make",
+    "me", "of", "on", "or", "please", "show", "that", "the", "this", "to",
+    "use", "what", "when", "where", "which", "why", "with",
 }
+_METADATA_FIELDS = ("concept_id", "concept", "keywords", "source_refs")
+MAX_SOURCE_PASSAGES = 8
+MAX_SOURCE_PASSAGE_CHARS = 1200
+_MAX_SOURCE_PAGES = 1000
 
 
 @dataclass(frozen=True)
@@ -29,7 +34,6 @@ class MatrixConcept:
     concept: str
     keywords: tuple[str, ...]
     source_refs: tuple[str, ...]
-    lesson_ids: tuple[str, ...]
     engine_weights: dict[str, float]
 
 
@@ -41,17 +45,15 @@ class ConceptMatch:
 
 @dataclass(frozen=True)
 class Recommendation:
-    topic: str
+    query: str
     concept_matches: tuple[ConceptMatch, ...]
     engine_weights: tuple[tuple[str, float], ...]
-    lesson_weights: tuple[tuple[str, float], ...]
     source_refs: tuple[str, ...]
 
 
 def _tokens(text: str) -> set[str]:
-    words = _TOKEN.findall(str(text).lower())
     result = set()
-    for word in words:
+    for word in _TOKEN.findall(str(text).lower()):
         if word.endswith("ies") and len(word) > 4:
             word = word[:-3] + "y"
         elif word.endswith("s") and not word.endswith("ss") and len(word) > 3:
@@ -61,91 +63,87 @@ def _tokens(text: str) -> set[str]:
     return result
 
 
-def _read_column(path: Path, field: str) -> dict[str, str]:
+def load_sources(path: Path = SOURCES_PATH) -> dict[str, dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as stream:
         reader = csv.DictReader(stream)
-        if not reader.fieldnames or field not in reader.fieldnames:
-            raise ValueError(f"{path.name} must contain a {field!r} column")
-        return {
-            row[field].strip(): row.get("status", "")
+        required = {"source_id", "relative_path", "status", "review_scope", "notes"}
+        if not required.issubset(reader.fieldnames or ()):
+            raise ValueError(f"{path.name} is missing required source-ledger columns")
+        sources = {
+            row["source_id"].strip(): {
+                field: row[field].strip()
+                for field in required
+            }
             for row in reader
-            if row.get(field, "").strip()
+            if row.get("source_id", "").strip()
         }
+    if not sources:
+        raise ValueError(f"{path.name} contains no sources")
+    return sources
 
 
-def load_matrix(path: Path = MATRIX_PATH) -> tuple[MatrixConcept, ...]:
-    """Load the reviewed matrix and reject stale engine/source/lesson links."""
-    engine_names = EngineCatalog.available()
-    metadata_fields = [
-        "concept_id", "concept", "keywords", "source_refs", "lesson_ids",
-    ]
-    source_statuses = _read_column(SOURCES_PATH, "source_id")
-    lesson_ids = set(_read_column(PLAN_PATH, "lesson_id"))
-    concepts = []
+def load_matrix(
+    path: Path = MATRIX_PATH,
+    sources_path: Path = SOURCES_PATH,
+) -> tuple[MatrixConcept, ...]:
+    """Load concepts and verify that source and engine links remain current."""
+    engine_names = tuple(EngineCatalog.available())
+    sources = load_sources(sources_path)
+    concepts: list[MatrixConcept] = []
     seen_ids: set[str] = set()
 
     with path.open(encoding="utf-8", newline="") as stream:
         reader = csv.DictReader(stream)
         fields = reader.fieldnames or []
         if (
-            fields[:len(metadata_fields)] != metadata_fields
-            or len(fields) != len(metadata_fields) + len(engine_names)
-            or set(fields[len(metadata_fields):]) != set(engine_names)
+            fields[:len(_METADATA_FIELDS)] != list(_METADATA_FIELDS)
+            or len(fields) != len(_METADATA_FIELDS) + len(engine_names)
+            or set(fields[len(_METADATA_FIELDS):]) != set(engine_names)
         ):
             raise ValueError(
-                f"{path.name} columns must match the registered engine catalog"
+                f"{path.name} columns must contain concept metadata followed by "
+                "the registered engine catalog"
             )
+
         for row_number, row in enumerate(reader, start=2):
             concept_id = row["concept_id"].strip()
             if not concept_id or concept_id in seen_ids:
-                raise ValueError(f"{path.name}:{row_number} has a missing or duplicate concept_id")
+                raise ValueError(
+                    f"{path.name}:{row_number} has a missing or duplicate concept_id"
+                )
             seen_ids.add(concept_id)
+            if not row["concept"].strip() or not row["keywords"].strip():
+                raise ValueError(
+                    f"{path.name}:{row_number} needs a concept and searchable keywords"
+                )
 
-            sources = tuple(filter(None, (item.strip() for item in row["source_refs"].split(";"))))
-            missing_sources = set(sources) - set(source_statuses)
+            source_refs = tuple(
+                item.strip() for item in row["source_refs"].split(";") if item.strip()
+            )
+            missing_sources = set(source_refs) - set(sources)
             if missing_sources:
                 raise ValueError(
                     f"{path.name}:{row_number} references unknown sources: "
                     f"{', '.join(sorted(missing_sources))}"
                 )
-            unavailable = {
-                item for item in sources
-                if source_statuses[item] != "readable"
-            }
-            if unavailable:
-                raise ValueError(
-                    f"{path.name}:{row_number} references unreadable sources: "
-                    f"{', '.join(sorted(unavailable))}"
-                )
-
-            lessons = tuple(filter(None, (item.strip() for item in row["lesson_ids"].split(";"))))
-            missing_lessons = set(lessons) - lesson_ids
-            if missing_lessons:
-                raise ValueError(
-                    f"{path.name}:{row_number} references unknown lessons: "
-                    f"{', '.join(sorted(missing_lessons))}"
-                )
-
             weights = {}
-            for name in engine_names:
+            for engine in engine_names:
                 try:
-                    weight = float(row[name])
+                    weight = float(row[engine])
                 except (TypeError, ValueError) as exc:
                     raise ValueError(
-                        f"{path.name}:{row_number} has an invalid {name} weight"
+                        f"{path.name}:{row_number} has an invalid {engine} weight"
                     ) from exc
                 if not math.isfinite(weight) or weight < 0:
                     raise ValueError(
                         f"{path.name}:{row_number} weights must be finite and non-negative"
                     )
-                weights[name] = weight
+                weights[engine] = weight
             total = math.fsum(weights.values())
             if not (math.isclose(total, 1.0, abs_tol=1e-9) or total == 0.0):
                 raise ValueError(
                     f"{path.name}:{row_number} engine weights must sum to 1 or all be 0"
                 )
-            if not row["concept"].strip() or not row["keywords"].strip():
-                raise ValueError(f"{path.name}:{row_number} needs a concept and keywords")
 
             concepts.append(MatrixConcept(
                 concept_id=concept_id,
@@ -153,8 +151,7 @@ def load_matrix(path: Path = MATRIX_PATH) -> tuple[MatrixConcept, ...]:
                 keywords=tuple(
                     item.strip() for item in row["keywords"].split(";") if item.strip()
                 ),
-                source_refs=sources,
-                lesson_ids=lessons,
+                source_refs=source_refs,
                 engine_weights=weights,
             ))
 
@@ -164,23 +161,23 @@ def load_matrix(path: Path = MATRIX_PATH) -> tuple[MatrixConcept, ...]:
 
 
 def match_concepts(
-    topic: str,
+    query: str,
     concepts: tuple[MatrixConcept, ...] | None = None,
 ) -> tuple[ConceptMatch, ...]:
-    query = _tokens(topic)
-    if not query:
-        raise ValueError("topic must contain at least one searchable word")
-    concepts = concepts if concepts is not None else load_matrix()
+    query_tokens = _tokens(query)
+    if not query_tokens:
+        raise ValueError("query must contain at least one searchable word")
+    available = concepts if concepts is not None else load_matrix()
     matches = []
-    for concept in concepts:
+    for concept in available:
         vocabulary = _tokens(" ".join((
             concept.concept_id.replace("_", " "),
             concept.concept,
             *concept.keywords,
         )))
-        overlap = query & vocabulary
+        overlap = query_tokens & vocabulary
         if overlap:
-            matches.append(ConceptMatch(concept, len(overlap) / len(query)))
+            matches.append(ConceptMatch(concept, len(overlap) / len(query_tokens)))
     return tuple(sorted(
         matches,
         key=lambda match: (-match.relevance, match.concept.concept_id),
@@ -189,82 +186,104 @@ def match_concepts(
 
 def _normalize_weights(
     evidence: dict[str, float],
-    categories: tuple[str, ...],
 ) -> tuple[tuple[str, float], ...]:
-    evidence_total = math.fsum(evidence.values())
-    if not categories or evidence_total <= 0:
+    total = math.fsum(evidence.values())
+    if total <= 0:
         return ()
-    probabilities = [
-        (category, evidence.get(category, 0.0) / evidence_total)
-        for category in categories
-    ]
-    return tuple(sorted(probabilities, key=lambda item: (-item[1], item[0])))
+    normalized = ((name, weight / total) for name, weight in evidence.items())
+    return tuple(sorted(normalized, key=lambda pair: (-pair[1], pair[0])))
 
 
-def recommend(topic: str, matrix_path: Path = MATRIX_PATH) -> Recommendation:
-    """Return normalized keyword-evidence weights, not calibrated probabilities."""
+def recommend(query: str, matrix_path: Path = MATRIX_PATH) -> Recommendation:
+    """Return related concepts, engines, and source IDs without choosing content."""
     concepts = load_matrix(matrix_path)
-    matches = match_concepts(topic, concepts)
-    if not matches:
-        raise ValueError(
-            f"no matrix concepts match {topic!r}; add a reviewed concept mapping first"
-        )
-
-    engine_evidence = {name: 0.0 for name in EngineCatalog.available()}
-    lesson_evidence: dict[str, float] = {}
+    matches = match_concepts(query, concepts)
+    evidence = {engine: 0.0 for engine in EngineCatalog.available()}
     for match in matches:
-        for name, weight in match.concept.engine_weights.items():
-            engine_evidence[name] += match.relevance * weight
-        if match.concept.lesson_ids:
-            per_lesson = match.relevance / len(match.concept.lesson_ids)
-            for lesson_id in match.concept.lesson_ids:
-                lesson_evidence[lesson_id] = lesson_evidence.get(lesson_id, 0.0) + per_lesson
-
-    engine_weights = _normalize_weights(
-        engine_evidence,
-        tuple(EngineCatalog.available()),
-    )
-    lesson_weights = _normalize_weights(
-        lesson_evidence,
-        tuple(sorted(lesson_evidence)),
-    )
-    sources = tuple(sorted({
+        for engine, weight in match.concept.engine_weights.items():
+            evidence[engine] += match.relevance * weight
+    engine_weights = _normalize_weights(evidence)
+    source_refs = tuple(sorted({
         source for match in matches for source in match.concept.source_refs
     }))
     return Recommendation(
-        topic=topic,
+        query=query,
         concept_matches=matches,
         engine_weights=engine_weights,
-        lesson_weights=lesson_weights,
-        source_refs=sources,
+        source_refs=source_refs,
     )
 
 
-def sample_lessons(
-    recommendation: Recommendation,
-    count: int = 1,
-    seed: int = 2026,
-) -> tuple[str, ...]:
-    """Sample distinct authored lessons from normalized matrix weights."""
-    count = int(count)
-    if count < 1:
-        raise ValueError("count must be at least 1")
-    if not recommendation.lesson_weights:
+@lru_cache(maxsize=8)
+def _pdf_page_text(path: str) -> tuple[str, ...]:
+    reader = PdfReader(path, strict=False)
+    if reader.is_encrypted:
+        raise ValueError(f"cannot retrieve text from encrypted source {Path(path).name}")
+    if len(reader.pages) > _MAX_SOURCE_PAGES:
         raise ValueError(
-            "matched concepts have no authored lesson; add and review a lesson first"
+            f"source {Path(path).name} exceeds the {_MAX_SOURCE_PAGES}-page retrieval limit"
         )
-    if count > len(recommendation.lesson_weights):
-        raise ValueError(
-            f"requested {count} lessons, but only "
-            f"{len(recommendation.lesson_weights)} are mapped to this topic"
-        )
+    return tuple(page.extract_text() or "" for page in reader.pages)
 
-    rng = random.Random(seed)
-    available = list(recommendation.lesson_weights)
-    chosen = []
-    for _ in range(count):
-        lesson_ids, probabilities = zip(*available)
-        selected = rng.choices(lesson_ids, weights=probabilities, k=1)[0]
-        chosen.append(selected)
-        available = [item for item in available if item[0] != selected]
-    return tuple(chosen)
+
+def retrieve_book_passages(
+    query: str,
+    source_refs: tuple[str, ...],
+    *,
+    sources: dict[str, dict[str, str]] | None = None,
+    max_passages: int = MAX_SOURCE_PASSAGES,
+) -> tuple[dict[str, str | int | float], ...]:
+    """Return short, page-cited PDF excerpts from text-readable linked sources."""
+    query_tokens = _tokens(query)
+    if not query_tokens or max_passages < 1:
+        return ()
+    source_catalog = sources if sources is not None else load_sources()
+    matches: list[tuple[float, str, int, dict[str, str | int | float]]] = []
+
+    for source_id in sorted(set(source_refs)):
+        source = source_catalog[source_id]
+        if source["status"] not in {"readable", "needs_review"}:
+            continue
+        relative_path = Path(source["relative_path"])
+        if relative_path.suffix.lower() != ".pdf":
+            continue
+        path = (ROOT / relative_path).resolve()
+        if not path.is_relative_to(ROOT):
+            raise ValueError(f"source {source_id!r} resolves outside the repository")
+
+        for page_number, page_text in enumerate(_pdf_page_text(str(path)), start=1):
+            page_tokens = _tokens(page_text)
+            overlap = query_tokens & page_tokens
+            if not overlap:
+                continue
+
+            token_match = next(
+                (
+                    token.start()
+                    for token in _TOKEN.finditer(page_text.lower())
+                    if _tokens(token.group()) & overlap
+                ),
+                0,
+            )
+            start = max(0, token_match - MAX_SOURCE_PASSAGE_CHARS // 3)
+            excerpt = " ".join(
+                page_text[start:start + MAX_SOURCE_PASSAGE_CHARS].split()
+            )
+            score = len(overlap) / len(query_tokens)
+            matches.append((
+                score,
+                source_id,
+                page_number,
+                {
+                    "source_ref": source_id,
+                    "relative_path": source["relative_path"],
+                    "page_number": page_number,
+                    "relevance": score,
+                    "review_status": source["status"],
+                    "review_scope": source["review_scope"],
+                    "excerpt": excerpt,
+                },
+            ))
+
+    matches.sort(key=lambda match: (-match[0], match[1], match[2]))
+    return tuple(match[3] for match in matches[:max_passages])

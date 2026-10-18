@@ -4,9 +4,10 @@ import wave
 import batch_runner
 
 
-def test_espeak_audio_targets_exact_format_duration(tmp_path, monkeypatch):
+def test_espeak_audio_uses_generated_audio_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(batch_runner, "TEMP_AUDIO", tmp_path)
     calls = []
+    pad_settings = []
 
     def fake_run(command, check):
         calls.append(command)
@@ -26,19 +27,37 @@ def test_espeak_audio_targets_exact_format_duration(tmp_path, monkeypatch):
                 voice.setframerate(44100)
                 voice.writeframes(b"\x00\x00" * int(target * 44100))
 
+    def fake_create_pad(duration, path, sound_plan, sample_rate=44100):
+        pad_settings.append((duration, sound_plan))
+        with wave.open(path, "wb") as pad:
+            pad.setnchannels(1)
+            pad.setsampwidth(2)
+            pad.setframerate(sample_rate)
+            pad.writeframes(b"\x00\x00" * int(duration * sample_rate))
+
     monkeypatch.setattr(batch_runner.subprocess, "run", fake_run)
-    script = " ".join(["Explain"] * 130)
+    monkeypatch.setattr("soundscape.create_pad_wav", fake_create_pad)
+    script = "Explain this generated concept."
     voice, pad, duration = batch_runner._synthesize_espeak_for_row(
-        {"orientation": "vertical", "audio_script": script},
+        {
+            "orientation": "horizontal",
+            "language": "en",
+            "audio_script": script,
+            "audio_json": (
+                '{"espeak_voice":"en-us","speech_rate_wpm":180,'
+                '"duration_seconds":48.5,"ambient":{"kind":"none"}}'
+            ),
+        },
         "test-short",
     )
 
-    assert duration == 55.0
+    assert duration == 48.5
     assert len(calls) == 2
-    assert calls[0][0] == "espeak-ng"
+    assert calls[0][:5] == ["espeak-ng", "-v", "en-us", "-s", "180"]
     assert calls[1][0] == "ffmpeg"
+    assert pad_settings == [(48.5, {"kind": "none"})]
     with wave.open(voice, "rb") as result:
-        assert result.getnframes() / result.getframerate() == 55.0
+        assert result.getnframes() / result.getframerate() == 48.5
     with wave.open(pad, "rb") as result:
-        assert result.getnframes() / result.getframerate() == 55.0
+        assert result.getnframes() / result.getframerate() == 48.5
     assert not list(tmp_path.glob("*_espeak_*"))

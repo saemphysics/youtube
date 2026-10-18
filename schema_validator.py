@@ -9,11 +9,11 @@ Supports both 9:16 (vertical) and 16:9 (horizontal). Validates:
   * Focus targets against visual element IDs
   * Frame-bounds for element positions
   * Edge-proximity warnings
-  * Word counts for audio scripts
   * PYQ structural integrity
   * Duplicate video_id and element id detection
 """
 from __future__ import annotations
+import argparse
 import csv
 import json
 import os
@@ -33,19 +33,9 @@ def _bounds(orientation: str):
     return -8.0, 8.0, -4.5, 4.5         # 16:9
 
 
-def audio_word_bounds(orientation: str) -> tuple[int, int]:
-    """Return spoken-word targets for a one-minute Short or three-minute lecture."""
-    return AUDIO_WORD_BOUNDS.get(str(orientation).lower(), AUDIO_WORD_BOUNDS["vertical"])
-
-
 # ────────────────────────────────────────────────────────────────────────
 # Constants
 # ────────────────────────────────────────────────────────────────────────
-AUDIO_WORD_BOUNDS = {
-    "vertical": (120, 145),
-    "horizontal": (350, 410),
-}
-HINDI_WORD_MAX_MULT = 1.2
 EDGE_MARGIN = 0.5
 
 REQUIRED_COLS = [
@@ -59,7 +49,6 @@ REQUIRED_COLS = [
 OPTIONAL_COLS = [
     "beats_json", "bindings_json", "formula_sheet_json",
     "manifest_path", "language", "quality", "orientation",
-    "audio_script_hi",
 ]
 
 KNOWN_PRIMITIVES = {
@@ -198,7 +187,6 @@ def validate_csv(path: str) -> bool:
             except ValueError:
                 return -1
 
-        idx_script_hi = col_index("audio_script_hi")
         idx_beats     = col_index("beats_json")
         idx_bindings  = col_index("bindings_json")
         idx_language  = col_index("language")
@@ -241,22 +229,6 @@ def validate_csv(path: str) -> bool:
                 else:
                     print(f"[WARN] Row {row_idx} ({vid}): bad orientation "
                           f"'{ro}'; using {ORIENTATION}.")
-
-            # --- audio word count
-            script = row[12].strip()
-            words = script.split()
-            word_min, word_max = audio_word_bounds(row_orientation)
-            if words and not (word_min <= len(words) <= word_max):
-                print(f"[WARN] Row {row_idx} ({vid}): {len(words)} words "
-                      f"(want {word_min}-{word_max} for {row_orientation}).")
-
-            if 0 <= idx_script_hi < len(row) and row[idx_script_hi].strip():
-                hi_words = row[idx_script_hi].split()
-                hi_max = int(word_max * HINDI_WORD_MAX_MULT)
-                if not (word_min <= len(hi_words) <= hi_max):
-                    print(f"[WARN] Row {row_idx} ({vid}): Hindi script "
-                          f"{len(hi_words)} words (want {word_min}-{hi_max} "
-                          f"for {row_orientation}).")
 
             # --- PYQ structural integrity
             if concept == "PYQ":
@@ -376,8 +348,10 @@ def validate_csv(path: str) -> bool:
 
 
 def main():
-    target = sys.argv[1] if len(sys.argv) > 1 else "content_batch.csv"
-    print(f"[INFO] Validating {target} (orientation={ORIENTATION})")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("csv", help="generated renderer-adapter CSV")
+    target = parser.parse_args().csv
+    print(f"[INFO] Validating {target}")
     if validate_csv(target):
         print("[SUCCESS] All checks passed.")
         return 0

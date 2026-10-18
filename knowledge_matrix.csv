@@ -1,19 +1,26 @@
-concept_id,concept,keywords,source_refs,lesson_ids,advanced_calculus,calculus,geometry,linear_algebra,kinematics,mechanics,rotational_mechanics,electrostatics,magnetics,electrodynamics,fluids,waves,vector_calculus,differential_equations
-wave_interference,Wave interference,"wave;waves;superposition;interference;amplitude;phase;fourier;harmonic",strang_cse;feynman_qed,mix01,0.12,0.05,0.05,0.10,0,0.12,0,0,0,0,0,0.40,0.06,0.10
-projectile_motion,Projectile motion,"projectile;trajectory;launch;kinematics;acceleration;velocity;range",strang_calculus;strang_cse,mix02,0,0.10,0.15,0.10,0.25,0.25,0,0,0,0,0,0,0,0.15
-energy_conversion,Energy transfer and conservation,"energy;falling;conservation;potential;kinetic;gravity;work",feynman_vol2;strang_calculus,mix03,0,0.10,0.05,0.05,0,0.40,0.10,0,0,0,0,0,0.05,0.25
-rotational_dynamics,Rotational dynamics,"torque;rotation;angular;lever;inertia;rotational",strang_calculus,mix04,0,0.10,0.10,0.10,0,0.25,0.45,0,0,0,0,0,0,0
-fluid_continuity,Fluid flow and continuity,"fluid;fluids;pipe;flow;continuity;pressure;area;streamline",feynman_vol2;strang_calculus,mix05,0.05,0.05,0.05,0.05,0,0.10,0,0,0,0,0.40,0,0.30,0
-electrostatic_field,Electrostatic fields,"electric;field;charge;charges;coulomb;gauss;potential;electrostatic",feynman_vol2;strang_cse,mix06,0.05,0.05,0.10,0.10,0,0,0,0.45,0,0,0,0,0.25,0
-electromagnetic_induction,Electromagnetic induction,"induction;magnetic;flux;faraday;voltage;electromagnetism;coil",feynman_vol2;strang_calculus;neet_2022,mix07,0.05,0.10,0.05,0.10,0,0,0,0.10,0.20,0.25,0,0.05,0.10,0
-coupled_modes,Coupled oscillators and normal modes,"eigenvector;eigenvectors;eigenvalue;eigenvalues;matrix;matrices;mode;modes;oscillator;coupled;linear algebra",feynman_vol3;strang_cse,mix08,0.05,0.05,0.05,0.40,0,0.20,0,0,0,0,0,0.15,0,0.10
-refraction,Refraction and optical paths,"light;refraction;snell;optics;ray;travel time;path;glass;lens;focal length;power",feynman_qed;strang_calculus;neet_2022,mix09,0.10,0.20,0.20,0.05,0,0,0,0,0,0.05,0,0.10,0,0.30
-random_walk_diffusion,Random walks and diffusion,"probability;probabilistic;random;stochastic;walk;gaussian;variance;distribution;diffusion",feynman_vol3;strang_cse,mix10,0.10,0.10,0,0.10,0,0.10,0,0,0,0,0,0.10,0.10,0.40
-fourier_series,Fourier series and harmonics,"fourier;series;harmonics;harmonic;frequency;signal;decomposition",strang_cse,mix01,0.15,0.10,0,0.25,0,0.05,0,0,0,0,0,0.25,0.05,0.15
-vector_field_calculus,Vector-field calculus,"vector field;gradient;divergence;curl;flux;line integral;surface integral;vector calculus",feynman_vol2;strang_calculus,,0.10,0.15,0.05,0.10,0,0.05,0,0.15,0.05,0.15,0.05,0.05,0.05,0.05
-quantum_amplitudes,Quantum states and probability amplitudes,"quantum;quantum mechanics;amplitude;probability amplitude;spin;state;superposition",feynman_vol3;feynman_qed,,0.05,0.10,0,0.40,0,0.05,0,0.05,0.05,0.10,0,0.15,0,0.05
-hamiltonian_matrix,Hamiltonian matrices and state evolution,"hamiltonian;matrix;matrices;eigenstate;eigenstates;quantum matrix;state evolution",feynman_vol3;strang_cse,,0.05,0.05,0.05,0.45,0,0.05,0,0,0,0,0,0.05,0,0.30
-computing_information,Computation and information,"computation;computer;computing;algorithm;algorithms;information;bits;reversible;logic;transistor",feynman_computation;sicp,,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-quantum_electrodynamics,Light-matter interactions,"quantum electrodynamics;photon;photons;electron;electrons;light matter;quantum light",feynman_qed;feynman_vol2,,0.05,0.05,0,0.20,0,0,0,0.10,0.10,0.30,0,0.20,0,0
-uniform_circular_motion,Uniform circular motion,"circular motion;centripetal force;centripetal acceleration;orbit;speed;radius",neet_2024;strang_calculus,,0.10,0.15,0.15,0,0.25,0.20,0.15,0,0,0,0,0,0,0
-instantaneous_power,Instantaneous power from motion,"instantaneous power;power;force;velocity;derivative;rate of change",neet_2024;strang_calculus,,0.20,0.35,0.05,0,0.10,0.30,0,0,0,0,0,0,0,0
+concept_id,concept,keywords,source_refs,advanced_calculus,calculus,geometry,linear_algebra,kinematics,mechanics,rotational_mechanics,electrostatics,magnetics,electrodynamics,fluids,waves,vector_calculus,differential_equations
+wave_interference,Wave interference,"wave;waves;superposition;interference;amplitude;phase;fourier;harmonic",strang_cse;feynman_qed,0.12,0.05,0.05,0.10,0,0.12,0,0,0,0,0,0.40,0.06,0.10
+projectile_motion,Projectile motion,"projectile;trajectory;launch;kinematics;acceleration;velocity;range",strang_calculus;strang_cse,0,0.10,0.15,0.10,0.25,0.25,0,0,0,0,0,0,0,0.15
+energy_conversion,Energy transfer and conservation,"energy;falling;conservation;potential;kinetic;gravity;work",feynman_vol2;strang_calculus,0,0.10,0.05,0.05,0,0.40,0.10,0,0,0,0,0,0.05,0.25
+rotational_dynamics,Rotational dynamics,"torque;rotation;angular;lever;inertia;rotational",strang_calculus,0,0.10,0.10,0.10,0,0.25,0.45,0,0,0,0,0,0,0
+fluid_continuity,Fluid flow and continuity,"fluid;fluids;pipe;flow;continuity;pressure;area;streamline",feynman_vol2;strang_calculus,0.05,0.05,0.05,0.05,0,0.10,0,0,0,0,0.40,0,0.30,0
+electrostatic_field,Electrostatic fields,"electric;field;charge;charges;coulomb;gauss;potential;electrostatic",feynman_vol2;strang_cse,0.05,0.05,0.10,0.10,0,0,0,0.45,0,0,0,0,0.25,0
+electromagnetic_induction,Electromagnetic induction,"induction;magnetic;flux;faraday;voltage;electromagnetism;coil",feynman_vol2;strang_calculus;neet_2022,0.05,0.10,0.05,0.10,0,0,0,0.10,0.20,0.25,0,0.05,0.10,0
+coupled_modes,Coupled oscillators and normal modes,"eigenvector;eigenvectors;eigenvalue;eigenvalues;matrix;matrices;mode;modes;oscillator;coupled;linear algebra",feynman_vol3;strang_cse,0.05,0.05,0.05,0.40,0,0.20,0,0,0,0,0,0.15,0,0.10
+refraction,Refraction and optical paths,"light;refraction;snell;optics;ray;travel time;path;glass;lens;focal length;power",feynman_qed;strang_calculus;neet_2022,0.10,0.20,0.20,0.05,0,0,0,0,0,0.05,0,0.10,0,0.30
+random_walk_diffusion,Random walks and diffusion,"probability;probabilistic;random;stochastic;walk;gaussian;variance;distribution;diffusion",feynman_vol3;strang_cse,0.10,0.10,0,0.10,0,0.10,0,0,0,0,0,0.10,0.10,0.40
+fourier_series,Fourier series and harmonics,"fourier;series;harmonics;harmonic;frequency;signal;decomposition",strang_cse,0.15,0.10,0,0.25,0,0.05,0,0,0,0,0,0.25,0.05,0.15
+vector_field_calculus,Vector-field calculus,"vector field;gradient;divergence;curl;flux;line integral;surface integral;vector calculus",feynman_vol2;strang_calculus,0.10,0.15,0.05,0.10,0,0.05,0,0.15,0.05,0.15,0.05,0.05,0.05,0.05
+quantum_amplitudes,Quantum states and probability amplitudes,"quantum;quantum mechanics;amplitude;probability amplitude;spin;state;superposition",feynman_vol3;feynman_qed,0.05,0.10,0,0.40,0,0.05,0,0.05,0.05,0.10,0,0.15,0,0.05
+hamiltonian_matrix,Hamiltonian matrices and state evolution,"hamiltonian;matrix;matrices;eigenstate;eigenstates;quantum matrix;state evolution",feynman_vol3;strang_cse,0.05,0.05,0.05,0.45,0,0.05,0,0,0,0,0,0.05,0,0.30
+computing_information,Computation and information,"computation;computer;computing;algorithm;algorithms;information;bits;reversible;logic;transistor",feynman_computation;sicp,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+algorithm_design,Algorithms and data structures,"algorithm;algorithms;data structure;sorting;searching;graph algorithm;runtime;complexity",mit_algorithms,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+information_theory,Information theory and communication,"information theory;communication;entropy;channel;coding;message;signal;capacity",shannon_information_theory,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+statistical_mechanics,Statistical mechanics and ensembles,"statistical mechanics;thermodynamics;ensemble;microstate;macrostate;partition function;boltzmann;temperature",feynman_statistical_mechanics,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+parallel_computing,Parallel hardware and computation,"parallel computing;parallelism;processor;multicore;concurrency;synchronization;hardware",parallel_hardware,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+machine_intelligence,Computing machinery and intelligence,"artificial intelligence;machine intelligence;thinking machine;imitation game;computing machinery;machine;learning machine",turing_mind,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+quantum_electrodynamics,Light-matter interactions,"quantum electrodynamics;photon;photons;electron;electrons;light matter;quantum light",feynman_qed;feynman_vol2,0.05,0.05,0,0.20,0,0,0,0.10,0.10,0.30,0,0.20,0,0
+uniform_circular_motion,Uniform circular motion,"circular motion;centripetal force;centripetal acceleration;orbit;speed;radius",neet_2024;strang_calculus,0.10,0.15,0.15,0,0.25,0.20,0.15,0,0,0,0,0,0,0
+instantaneous_power,Instantaneous power from motion,"instantaneous power;power;force;velocity;derivative;rate of change",neet_2024;strang_calculus,0.20,0.35,0.05,0,0.10,0.30,0,0,0,0,0,0,0,0
+differentiation,Derivatives and local rates of change,"derivative;differentiate;slope;rate of change;instantaneous;function;limit;tangent",strang_calculus,0.15,0.65,0.05,0.05,0.05,0.05,0,0,0,0,0,0,0,0
+integration,Integrals and accumulated change,"integral;integration;accumulation;area;antiderivative;total change;function",strang_calculus,0.15,0.65,0.05,0.05,0,0.05,0,0,0,0,0,0,0,0.05

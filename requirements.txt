@@ -32,6 +32,8 @@ packaging==24.0
 # --- Validation & utils ---
 # schema_validator.py is stdlib only (csv, json, os, re, sys)
 # batch_runner.py needs ffmpeg via apt, not pip
+pypdf==6.21.1
+scipy>=1.15.0
 tqdm==4.66.2
 
 # --- Optional: For future LLM content gen (Layer 2) ---

@@ -1,80 +1,89 @@
-import csv
-import json
 import math
 
-import pytest
-
-from generate_requested_csv import generate
-from generate_lecture_series import FIELDS
-from matrix_engine import (
-    load_matrix,
-    recommend,
-    sample_lessons,
-)
+from matrix_engine import load_matrix, load_sources, match_concepts, recommend
 from physics_engine import EngineCatalog
 
 
-def test_matrix_covers_every_registered_engine_and_validates_links():
+def test_knowledge_matrix_covers_every_engine_and_validates_source_links():
     concepts = load_matrix()
+    sources = load_sources()
+
     assert concepts
     assert set(concepts[0].engine_weights) == set(EngineCatalog.available())
     assert all(
-        math.isclose(sum(concept.engine_weights.values()), 1.0)
-        or sum(concept.engine_weights.values()) == 0.0
+        math.isclose(math.fsum(concept.engine_weights.values()), 1.0)
+        or math.fsum(concept.engine_weights.values()) == 0.0
         for concept in concepts
     )
-
-
-def test_recommendation_links_eigenvectors_to_sources_engines_and_authored_lesson():
-    recommendation = recommend("eigenvectors")
-
-    assert recommendation.concept_matches[0].concept.concept_id == "coupled_modes"
-    assert {"feynman_vol3", "strang_cse"} <= set(recommendation.source_refs)
-    assert recommendation.engine_weights[0][0] == "linear_algebra"
-    assert recommendation.lesson_weights == (("mix08", 1.0),)
-    assert math.isclose(sum(weight for _, weight in recommendation.engine_weights), 1.0)
-
-
-def test_requested_csv_uses_the_existing_render_schema_for_both_orientations(tmp_path):
-    paths, recommendation, selected = generate(
-        "eigenvectors",
-        orientation="both",
-        seed=14,
-        output_dir=tmp_path,
+    assert all(
+        source in sources
+        for concept in concepts
+        for source in concept.source_refs
     )
-
-    assert selected == ("mix08",)
-    assert recommendation.source_refs
-    assert len(paths) == 2
-    for path, orientation in zip(paths, ("horizontal", "vertical")):
-        with path.open(encoding="utf-8", newline="") as stream:
-            reader = csv.DictReader(stream)
-            assert reader.fieldnames == FIELDS
-            rows = list(reader)
-        assert len(rows) == 1
-        assert rows[0]["lesson_id"] == "mix08"
-        assert rows[0]["orientation"] == orientation
-        assert json.loads(rows[0]["equations_json"])
-        assert json.loads(rows[0]["visual_data_json"])
+    assert not hasattr(concepts[0], "lesson_ids")
 
 
-def test_weighted_lesson_sampling_is_reproducible():
-    recommendation = recommend("matrix eigenvalues")
-    assert sample_lessons(recommendation, seed=991) == sample_lessons(
-        recommendation,
-        seed=991,
+def test_retrieval_links_calculus_and_feynman_sources_to_related_concepts():
+    recommendation = recommend("magnetic flux, induction, and changing fields")
+
+    assert recommendation.concept_matches[0].concept.concept_id == "electromagnetic_induction"
+    assert "feynman_vol2" in recommendation.source_refs
+    assert "strang_calculus" in recommendation.source_refs
+    assert dict(recommendation.engine_weights)["electrodynamics"] > 0
+
+
+def test_new_books_are_retrievable_with_unreviewed_limits():
+    cases = (
+        (
+            "sorting algorithms",
+            "algorithm_design",
+            "mit_algorithms",
+            "needs_review",
+            "topic mapping only",
+        ),
+        (
+            "information theory and channel coding",
+            "information_theory",
+            "shannon_information_theory",
+            "needs_review",
+            "topic mapping only",
+        ),
+        (
+            "statistical mechanics and ensembles",
+            "statistical_mechanics",
+            "feynman_statistical_mechanics",
+            "needs_review",
+            "topic mapping only",
+        ),
+        (
+            "parallel processors and hardware",
+            "parallel_computing",
+            "parallel_hardware",
+            "needs_ocr",
+            "none",
+        ),
+        (
+            "machine intelligence and the imitation game",
+            "machine_intelligence",
+            "turing_mind",
+            "needs_review",
+            "title-level topic mapping only",
+        ),
     )
+    sources = load_sources()
+
+    for query, concept_id, source_id, status, review_scope in cases:
+        recommendation = recommend(query)
+
+        assert recommendation.concept_matches[0].concept.concept_id == concept_id
+        assert source_id in recommendation.source_refs
+        assert sources[source_id]["status"] == status
+        assert sources[source_id]["review_scope"] == review_scope
 
 
-def test_computation_concepts_without_an_authored_lesson_fail_explicitly():
-    recommendation = recommend("computer information bits")
-
+def test_matrix_retrieval_does_not_select_a_fixed_output_for_unmatched_queries():
+    assert match_concepts("a topic not indexed here") == ()
+    recommendation = recommend("a topic not indexed here")
+    assert recommendation.concept_matches == ()
+    assert recommendation.source_refs == ()
     assert recommendation.engine_weights == ()
-    assert recommendation.lesson_weights == ()
-    with pytest.raises(ValueError, match="no authored lesson"):
-        sample_lessons(recommendation)
-
-
-def test_unknown_topic_is_not_silently_mapped_to_a_default_lesson():
-    with pytest.raises(ValueError, match="no matrix concepts match"):
-        recommend("unmapped astrophysical topic")

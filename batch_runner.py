@@ -1,7 +1,7 @@
 """
 batch_runner.py — Subprocess orchestrator & FFmpeg audio/video stitcher.
 
-Reads content_batch.csv, for each row:
+Reads a renderer-adapter CSV emitted from a generated plan, for each row:
   1. Validates the CSV via schema_validator (pre-flight gate)
   2. Synthesizes voice + ambient pad via generate_audio.py (lazy import)
   3. Invokes render_universal.py as a subprocess
@@ -40,9 +40,7 @@ from pathlib import Path
 # Paths and constants
 # ────────────────────────────────────────────────────────────────────────
 OUTPUT_DIR       = Path("output_shorts")
-DEFAULT_CSV_FILE = Path("content_batch.csv")
-CSV_FILE         = DEFAULT_CSV_FILE
-VOICE_SAMPLE     = Path("saem_voice_sample.wav")
+CSV_FILE         = None
 MEDIA_DIR        = Path("media")
 TEMP_AUDIO       = Path("temp_audio")
 
@@ -152,8 +150,8 @@ def parse_args():
     p.add_argument(
         "--csv",
         type=Path,
-        default=DEFAULT_CSV_FILE,
-        help="Input batch CSV (default: content_batch.csv).",
+        required=True,
+        help="Renderer-adapter CSV emitted from a generated plan.",
     )
     p.add_argument("--only", type=str, default="")
     p.add_argument("--resume", action="store_true")
@@ -170,8 +168,8 @@ def parse_args():
     p.add_argument(
         "--voice-backend",
         choices=["coqui", "espeak"],
-        default="coqui",
-        help="Narration synthesizer. 'espeak' is offline and does not clone a voice.",
+        default="",
+        help="Override the generated audio plan's voice backend.",
     )
     p.add_argument("--skip-stitch", action="store_true",
                    help="Keep raw MP4 without FFmpeg mux.")
@@ -186,12 +184,8 @@ def parse_args():
 # ────────────────────────────────────────────────────────────────────────
 def preflight_csv() -> None:
     """Run schema_validator.validate_csv on the active CSV. Exit 1 on error."""
-    try:
-        from schema_validator import validate_csv
-    except ImportError as e:
-        print(f"[WARN] Could not import schema_validator ({e}); "
-              f"skipping pre-flight validation.")
-        return
+    from schema_validator import validate_csv
+
     print(f"[{_ts()}] [preflight] Validating {CSV_FILE}…")
     if not validate_csv(str(CSV_FILE)):
         print(f"[{_ts()}] [preflight] FATAL — schema validation failed. "
@@ -216,16 +210,6 @@ def process_batch():
     # Pre-flight (unless we're in a hurry and just want to see the row list)
     if not args.dry_run:
         preflight_csv()
-
-    if not VOICE_SAMPLE.exists():
-        if args.skip_audio or args.dry_run:
-            print(f"[{_ts()}] [WARN] {VOICE_SAMPLE} missing — "
-                  f"--skip-audio or --dry-run so continuing.")
-        else:
-            raise FileNotFoundError(
-                f"Reference voice sample '{VOICE_SAMPLE}' not found. "
-                f"Place it in the repo root, or use --skip-audio."
-            )
 
     with CSV_FILE.open(encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -286,12 +270,18 @@ def process_batch():
         last_err: Exception | None = None
         for attempt in range(1, args.retries + 2):
             try:
+                audio_config = _audio_config(row)
+                voice_backend = (
+                    args.voice_backend
+                    or str(audio_config.get("voice_backend", ""))
+                    or ("coqui" if audio_config.get("voice_reference") else "espeak")
+                )
                 _render_one(
                     row, vid_id, final_output,
                     draft=args.draft,
                     no_voiceover=args.no_voiceover,
                     skip_audio=args.skip_audio,
-                    voice_backend=args.voice_backend,
+                    voice_backend=voice_backend,
                     skip_stitch=args.skip_stitch,
                     orientation_override=args.orientation,
                 )
@@ -362,18 +352,14 @@ def _render_one(row: dict, vid_id: str, final_output: Path,
             voice, pad, duration = _make_silent_audio(row, vid_id)
         elif voice_backend == "espeak":
             voice, pad, duration = _synthesize_espeak_for_row(row, vid_id)
+        elif voice_backend == "coqui":
+            from generate_audio import synthesize_audio_for_row
+            voice, pad, duration = synthesize_audio_for_row(
+                row,
+                output_dir=str(TEMP_AUDIO),
+            )
         else:
-            try:
-                # Lazy import so --dry-run doesn't pull in torch/XTTS
-                from generate_audio import synthesize_audio_for_row
-                voice, pad, duration = synthesize_audio_for_row(
-                    row,
-                    speaker_wav=str(VOICE_SAMPLE),
-                    output_dir=str(TEMP_AUDIO),
-                )
-            except Exception as e:
-                print(f"[{_ts()}]   ! TTS failed ({e}) -> FALLBACK to silent audio (video will still render)")
-                voice, pad, duration = _make_silent_audio(row, vid_id)
+            raise ValueError(f"Unsupported voice backend: {voice_backend!r}")
 
         # ---- 2. Render -----------------------------------------------
         ori = (orientation_override
@@ -474,20 +460,32 @@ def _make_silent_audio(row: dict, vid_id: str) -> tuple[str, str, float]:
     return str(path), str(pad_path), duration
 
 
+def _audio_config(row: dict) -> dict:
+    raw = str_val(row, "audio_json")
+    if not raw:
+        return {}
+    try:
+        config = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid audio_json for '{str_val(row, 'video_id')}': {exc.msg}") from exc
+    if not isinstance(config, dict):
+        raise ValueError(f"audio_json for '{str_val(row, 'video_id')}' must be an object")
+    return config
+
+
 def _synthesize_espeak_for_row(row: dict, vid_id: str) -> tuple[str, str, float]:
     """Create offline narration and fit its duration to the selected format."""
     import wave
 
+    audio_config = _audio_config(row)
     script = str_val(row, "audio_script")
     if not script:
         raise ValueError(f"Audio script is missing for video ID '{vid_id}'")
-    orientation = str_val(row, "orientation").lower()
-    if orientation not in ("horizontal", "vertical"):
-        raise ValueError(f"Unsupported orientation for '{vid_id}': {orientation!r}")
-
-    target_duration = 175.0 if orientation == "horizontal" else 55.0
-    word_count = len(script.split())
-    speech_rate = round(word_count * 60.0 / target_duration)
+    requested_duration = audio_config.get("duration_seconds")
+    if requested_duration is not None:
+        target_duration = float(requested_duration)
+        if not 0.0 < target_duration < 3600.0:
+            raise ValueError("audio.duration_seconds must be greater than zero and under one hour")
     TEMP_AUDIO.mkdir(parents=True, exist_ok=True)
     voice_path = TEMP_AUDIO / f"{vid_id}_voice.wav"
     pad_path = TEMP_AUDIO / f"{vid_id}_pad.wav"
@@ -496,39 +494,51 @@ def _synthesize_espeak_for_row(row: dict, vid_id: str) -> tuple[str, str, float]
     script_path.write_text(script, encoding="utf-8")
 
     try:
-        subprocess.run(
-            [
-                "espeak-ng", "-v", "en-us", "-s", str(speech_rate),
-                "-w", str(source_path), "-f", str(script_path),
-            ],
-            check=True,
-        )
+        speech_command = ["espeak-ng"]
+        espeak_voice = audio_config.get("espeak_voice") or str_val(row, "language")
+        if espeak_voice:
+            speech_command.extend(["-v", str(espeak_voice)])
+        speech_rate = audio_config.get("speech_rate_wpm")
+        if speech_rate is not None:
+            speech_rate = int(speech_rate)
+            if not 80 <= speech_rate <= 450:
+                raise ValueError("audio.speech_rate_wpm must be between 80 and 450")
+            speech_command.extend(["-s", str(speech_rate)])
+        speech_command.extend(["-w", str(source_path), "-f", str(script_path)])
+        subprocess.run(speech_command, check=True)
         with wave.open(str(source_path), "rb") as source:
             source_duration = source.getnframes() / source.getframerate()
         if source_duration <= 0:
             raise ValueError(f"espeak-ng produced empty narration for '{vid_id}'")
 
-        tempo = source_duration / target_duration
-        if not 0.5 <= tempo <= 2.0:
-            raise ValueError(
-                f"espeak narration for '{vid_id}' needs unsupported tempo "
-                f"factor {tempo:.2f}; adjust the script or speech rate"
-            )
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", str(source_path),
-                "-af", f"atempo={tempo:.8f},apad,atrim=duration={target_duration}",
-                "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le",
-                str(voice_path),
-            ],
-            check=True,
+        if requested_duration is None:
+            target_duration = source_duration
+        else:
+            tempo = source_duration / target_duration
+            if not 0.5 <= tempo <= 2.0:
+                raise ValueError(
+                    f"espeak narration for '{vid_id}' needs unsupported tempo "
+                    f"factor {tempo:.2f}; revise the request duration or speech rate"
+                )
+            audio_filter = f"atempo={tempo:.8f},apad,atrim=duration={target_duration}"
+
+        command = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(source_path),
+        ]
+        if requested_duration is not None:
+            command.extend(["-af", audio_filter])
+        command.extend([
+            "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", str(voice_path),
+        ])
+        subprocess.run(command, check=True)
+        from soundscape import create_pad_wav
+
+        create_pad_wav(
+            target_duration,
+            str(pad_path),
+            audio_config.get("ambient", {"kind": "none"}),
         )
-        with wave.open(str(pad_path), "wb") as pad:
-            pad.setnchannels(1)
-            pad.setsampwidth(2)
-            pad.setframerate(44100)
-            pad.writeframes(b"\x00\x00" * int(target_duration * 44100))
     finally:
         source_path.unlink(missing_ok=True)
         script_path.unlink(missing_ok=True)

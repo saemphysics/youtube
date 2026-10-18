@@ -363,12 +363,21 @@ class LinearAlgebraEngine:
             raise ValueError("matrix is singular") from error
 
     @staticmethod
+    def eigenvalues(matrix) -> np.ndarray:
+        m = np.asarray(matrix, dtype=np.float64)
+        if m.ndim != 2 or m.shape[0] != m.shape[1] or not np.all(np.isfinite(m)):
+            raise ValueError("eigenvalues requires a finite square matrix")
+        values = np.linalg.eigvals(m)
+        return np.asarray(np.sort(values)[::-1], dtype=np.float64)
+
+    @staticmethod
     def eigendecomposition(matrix) -> tuple[np.ndarray, np.ndarray]:
         m = np.asarray(matrix, dtype=np.float64)
         if m.ndim != 2 or m.shape[0] != m.shape[1] or not np.all(np.isfinite(m)):
             raise ValueError("eigendecomposition requires a finite square matrix")
         values, vectors = np.linalg.eig(m)
-        return values, vectors
+        order = np.argsort(np.real(values))[::-1]
+        return values[order], vectors[:, order]
 
     @staticmethod
     def singular_value_decomposition(matrix) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

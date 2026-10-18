@@ -13,13 +13,14 @@ Optional CSV columns:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 import torch
-from scipy.signal import butter, lfilter, resample_poly
+from scipy.signal import resample_poly
 from TTS.api import TTS
 
 try:
@@ -31,7 +32,6 @@ except ImportError:
 os.environ.setdefault("COQUI_TOS_AGREED", "1")
 
 CANONICAL_SR   = 44100
-TARGET_PAD_DB  = -34.0
 _TTS_MODEL: TTS | None = None
 _SPEAKER_LATENT: tuple | None = None
 
@@ -98,7 +98,7 @@ def _resample_to_canonical(path: str | Path):
 def create_ambient_pad(
     voice_path: str | Path,
     output_pad_path: str | Path,
-    target_gain_db: float = TARGET_PAD_DB,
+    sound_plan: dict,
     sample_rate: int = CANONICAL_SR,
 ):
     data, sr = sf.read(str(voice_path))
@@ -107,27 +107,15 @@ def create_ambient_pad(
             f"Voice sample rate {sr} does not match target {sample_rate}. "
             f"Call _resample_to_canonical first."
         )
-    n = len(data) if data.ndim == 1 else data.shape[0]
+    duration = len(data) / sr if data.ndim == 1 else data.shape[0] / sr
+    from soundscape import create_pad_wav
 
-    nyq = 0.5 * sr
-    cutoff = min(400.0, nyq - 1.0)
-    b, a = butter(2, cutoff / nyq, btype="low", analog=False)
-
-    rng = np.random.default_rng(42)
-    noise = lfilter(b, a, rng.normal(0, 1.0, n))
-
-    rms = np.sqrt(np.mean(noise ** 2) + 1e-12)
-    target_rms = 10 ** (target_gain_db / 20.0)
-    noise = (noise / rms) * target_rms
-    noise = np.clip(noise, -1.0, 1.0)
-
-    sf.write(str(output_pad_path), noise.astype(np.float32),
-             int(sr), subtype="PCM_16")
+    create_pad_wav(duration, str(output_pad_path), sound_plan, int(sr))
 
 
 def synthesize_audio_for_row(
     row: dict,
-    speaker_wav: str = "saem_voice_sample.wav",
+    speaker_wav: str | None = None,
     output_dir: str = ".",
 ) -> tuple[str, str, float]:
     vid_id = (str(row.get("video_id") or "short_video")).strip() or "short_video"
@@ -141,14 +129,30 @@ def synthesize_audio_for_row(
     script = normalize_text(script)
     if not script:
         raise ValueError(f"Audio script is missing for video ID '{vid_id}'")
+    try:
+        audio_config = json.loads(row.get("audio_json") or "{}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid audio_json for video ID '{vid_id}': {exc.msg}") from exc
+    if not isinstance(audio_config, dict):
+        raise ValueError(f"audio_json for video ID '{vid_id}' must be an object")
+    speaker_wav = (
+        speaker_wav
+        or audio_config.get("voice_reference")
+        or os.environ.get("SAEM_VOICE_REFERENCE")
+    )
+    if not speaker_wav:
+        raise ValueError(
+            f"Audio plan for '{vid_id}' needs a voice_reference or "
+            "SAEM_VOICE_REFERENCE for the Coqui backend."
+        )
     if not Path(speaker_wav).exists():
         raise FileNotFoundError(
             f"Reference voice sample '{speaker_wav}' not found"
         )
 
     language    = (str(row.get("language") or "en")).strip() or "en"
-    speed       = float(row.get("tts_speed") or 1.0)
-    temperature = float(row.get("tts_temperature") or 0.65)
+    speed       = float(audio_config.get("speed", row.get("tts_speed") or 1.0))
+    temperature = float(audio_config.get("temperature", row.get("tts_temperature") or 0.65))
     seed        = _seed_from_id(vid_id)
 
     print(f"[TTS] Synthesizing '{vid_id}' "
@@ -203,7 +207,12 @@ def synthesize_audio_for_row(
     raw_duration = len(wav_data) / 24000.0
     _resample_to_canonical(voice_path)
     duration = get_wav_duration(voice_path)
-    create_ambient_pad(voice_path, pad_path, sample_rate=CANONICAL_SR)
+    create_ambient_pad(
+        voice_path,
+        pad_path,
+        audio_config.get("ambient", {"kind": "none"}),
+        sample_rate=CANONICAL_SR,
+    )
 
     drift = duration - raw_duration
     print(f"[TTS] Completed '{vid_id}' | "

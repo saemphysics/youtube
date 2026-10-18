@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""soundscape.py — Voice mastering chain + ambient pad generator.
+"""Voice mastering and request-defined sound-bed synthesis.
 
 Public functions used by the pipeline:
     master_voice_only(input_wav, output_wav) -> duration_sec
-    create_pad_wav(duration_sec, output_wav)
-
-Legacy `master_voice` mixes voice + pad in one file. Kept for offline use
-but deprecated — batch_runner mixes via FFmpeg instead.
+    create_pad_wav(duration_sec, output_wav, sound_plan)
 """
 from __future__ import annotations
 
 import logging
-import warnings
-from typing import Optional
+import wave
 
 import numpy as np
-from scipy.io import wavfile
-from scipy.signal import butter, sosfilt, resample_poly
+
+try:
+    from scipy.io import wavfile
+    from scipy.signal import butter, sosfilt, resample_poly
+    HAS_SCIPY = True
+except ImportError:  # pragma: no cover - fallback path used in lightweight environments
+    wavfile = None
+    butter = None
+    sosfilt = None
+    resample_poly = None
+    HAS_SCIPY = False
 
 try:
     import pyloudnorm as pyln
@@ -31,14 +36,8 @@ log = logging.getLogger(__name__)
 # Constants
 # ────────────────────────────────────────────────────────────────────────
 CANONICAL_SR = 44100
-PAD_FREQ_HZ  = 110.0
-PAD_GAIN     = 0.020
 PEAK_TARGET  = 0.891           # ≈ -1 dBFS sample-peak ceiling
 LUFS_TARGET  = -14.0           # YouTube normalization target
-
-# Slight detune for organic beating in the ambient pad
-PAD_DETUNE   = (1.000, 1.499, 2.003)
-PAD_WEIGHTS  = (1.00, 0.35, 0.15)
 
 # Platform-specific loudness targets
 LOUDNESS_PRESETS = {
@@ -54,8 +53,23 @@ LOUDNESS_PRESETS = {
 # ────────────────────────────────────────────────────────────────────────
 # Filter primitives
 # ────────────────────────────────────────────────────────────────────────
+def _simple_lowpass(sig: np.ndarray, cutoff_hz: float, sample_rate: int) -> np.ndarray:
+    if sig.size == 0:
+        return sig.astype(np.float32)
+    if cutoff_hz <= 0 or cutoff_hz >= sample_rate / 2:
+        return sig.astype(np.float32)
+    window = min(31, max(3, int(sample_rate / cutoff_hz)))
+    if window % 2 == 0:
+        window += 1
+    kernel = np.ones(window, dtype=np.float64) / window
+    padded = np.pad(sig.astype(np.float64), (window // 2, window // 2), mode="edge")
+    return np.convolve(padded, kernel, mode="valid").astype(np.float32)
+
+
 def _highpass(sig: np.ndarray, sr: int,
               cutoff: float = 80.0) -> np.ndarray:
+    if not HAS_SCIPY or butter is None or sosfilt is None:
+        return sig.astype(np.float32) - _simple_lowpass(sig, cutoff, sr)
     nyq = sr / 2.0
     cutoff = max(1.0, min(cutoff, nyq * 0.95))
     sos = butter(2, cutoff / nyq, btype="high", output="sos")
@@ -64,6 +78,8 @@ def _highpass(sig: np.ndarray, sr: int,
 
 def _lowpass(sig: np.ndarray, sr: int,
              cutoff: float = 12000.0) -> np.ndarray:
+    if not HAS_SCIPY or butter is None or sosfilt is None:
+        return _simple_lowpass(sig, cutoff, sr)
     nyq = sr / 2.0
     cutoff = min(cutoff, nyq * 0.95)
     sos = butter(2, cutoff / nyq, btype="low", output="sos")
@@ -179,6 +195,11 @@ def _trim_silence(sig: np.ndarray, sr: int, threshold: float = 0.005,
 def _resample(sig: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
     if sr_in == sr_out:
         return sig.astype(np.float32)
+    if not HAS_SCIPY or resample_poly is None:
+        ratio = sr_out / sr_in
+        indices = np.linspace(0, len(sig) - 1, int(round(len(sig) * ratio)), dtype=np.float64)
+        out = np.interp(indices, np.arange(len(sig)), sig.astype(np.float64))
+        return np.clip(out, -1.0, 1.0).astype(np.float32)
     g = int(np.gcd(sr_in, sr_out))
     out = resample_poly(sig, sr_out // g, sr_in // g)
     # resample_poly can overshoot ±1; clip before downstream processing
@@ -186,110 +207,100 @@ def _resample(sig: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
 
 
 # ────────────────────────────────────────────────────────────────────────
-# Ambient pad
+# Request-defined sound bed
 # ────────────────────────────────────────────────────────────────────────
-def generate_ambient_pad(duration_sec: float,
-                         sample_rate: int = CANONICAL_SR) -> np.ndarray:
-    n = max(1, int(sample_rate * duration_sec))
-    t = np.linspace(0, duration_sec, n, endpoint=False, dtype=np.float64)
+def generate_ambient_pad(
+    duration_sec: float,
+    sound_plan: dict,
+    sample_rate: int = CANONICAL_SR,
+) -> np.ndarray:
+    duration_sec = float(duration_sec)
+    sample_rate = int(sample_rate)
+    if not np.isfinite(duration_sec) or duration_sec < 0:
+        raise ValueError("duration_sec must be finite and non-negative")
+    if sample_rate < 1:
+        raise ValueError("sample_rate must be positive")
+    if not isinstance(sound_plan, dict):
+        raise TypeError("sound_plan must be a JSON object")
 
-    # Slow LFO for organic motion
-    lfo = 1.0 + 0.15 * np.sin(2 * np.pi * 0.1 * t)
+    kind = str(sound_plan.get("kind", "none")).lower()
+    n = int(sample_rate * duration_sec)
+    if kind == "none":
+        return np.zeros(n, dtype=np.float32)
+    if kind not in {"noise", "tones"}:
+        raise ValueError(f"unsupported sound-bed kind: {kind!r}")
 
-    drone = np.zeros(n, dtype=np.float64)
-    for detune, weight in zip(PAD_DETUNE, PAD_WEIGHTS):
-        drone += weight * np.sin(2 * np.pi * PAD_FREQ_HZ * detune * t)
-    drone *= lfo * PAD_GAIN
-    drone = drone.astype(np.float32)
-
-    fade = min(int(sample_rate * 0.6), n // 2)
-    if fade > 0:
-        env = np.ones(n, dtype=np.float32)
-        env[:fade] = np.linspace(0, 1, fade)
-        env[-fade:] = np.linspace(1, 0, fade)
-        drone *= env
-    return drone
-
-
-# ────────────────────────────────────────────────────────────────────────
-# WAV I/O helpers
-# ────────────────────────────────────────────────────────────────────────
-def _to_mono_float(data: np.ndarray, dtype) -> np.ndarray:
-    if dtype == np.int16:
-        out = data.astype(np.float32) / 32768.0
-    elif dtype == np.int32:
-        out = data.astype(np.float32) / 2147483648.0
+    gain_db = float(sound_plan.get("gain_db"))
+    if not np.isfinite(gain_db) or not -80.0 <= gain_db <= 0.0:
+        raise ValueError("sound-bed gain_db must be between -80 and 0 dB")
+    t = np.arange(n, dtype=np.float64) / sample_rate
+    if kind == "noise":
+        cutoff_hz = float(sound_plan.get("cutoff_hz"))
+        if not np.isfinite(cutoff_hz) or not 20.0 <= cutoff_hz < sample_rate / 2:
+            raise ValueError("noise cutoff_hz must be finite and below Nyquist")
+        seed = sound_plan.get("seed")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise ValueError("noise sound beds require an integer seed")
+        white_noise = np.random.default_rng(seed).normal(size=n).astype(np.float32)
+        if HAS_SCIPY and butter is not None and sosfilt is not None:
+            sos = butter(2, cutoff_hz / (sample_rate / 2), btype="low", output="sos")
+            signal = sosfilt(sos, white_noise).astype(np.float64)
+        else:
+            signal = _simple_lowpass(white_noise, cutoff_hz, sample_rate).astype(np.float64)
     else:
-        out = data.astype(np.float32)
-    if out.ndim > 1:
-        out = np.mean(out, axis=1)
-    return out
+        frequencies = sound_plan.get("frequencies_hz")
+        levels = sound_plan.get("levels")
+        if (
+            not isinstance(frequencies, list)
+            or not frequencies
+            or not isinstance(levels, list)
+            or len(levels) != len(frequencies)
+        ):
+            raise ValueError("tone sound beds require matching frequencies_hz and levels arrays")
+        signal = np.zeros(n, dtype=np.float64)
+        for frequency, level in zip(frequencies, levels):
+            frequency = float(frequency)
+            level = float(level)
+            if not np.isfinite(frequency) or not 20.0 <= frequency < sample_rate / 2:
+                raise ValueError("tone frequencies must be finite and below Nyquist")
+            if not np.isfinite(level) or level < 0.0:
+                raise ValueError("tone levels must be finite and non-negative")
+            signal += level * np.sin(2.0 * np.pi * frequency * t)
+
+    rms = float(np.sqrt(np.mean(signal ** 2) + 1e-12))
+    if rms == 0.0:
+        return np.zeros(n, dtype=np.float32)
+    signal = signal / rms * (10.0 ** (gain_db / 20.0))
+    return np.clip(signal, -1.0, 1.0).astype(np.float32)
 
 
-def _write_int16_wav(path: str, sr: int, sig: np.ndarray) -> None:
-    pcm = np.clip(sig * 32767.0, -32768, 32767).astype(np.int16)
-    wavfile.write(path, sr, pcm)
+def _write_int16_wav(output_wav: str, sample_rate: int, signal: np.ndarray) -> None:
+    with wave.open(output_wav, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes((np.clip(signal, -1.0, 1.0) * 32767).astype(np.int16).tobytes())
 
 
-# ────────────────────────────────────────────────────────────────────────
-# Public API
-# ────────────────────────────────────────────────────────────────────────
-def master_voice_only(input_wav: str, output_wav: str,
-                      platform: str = "default") -> float:
-    """Master a voice WAV: mono, 44.1 kHz, EBU-ish loudness, peak-limited."""
-    sr, raw = wavfile.read(input_wav)
-    voice = _to_mono_float(raw, raw.dtype)
-    if voice.size == 0:
-        raise ValueError(f"'{input_wav}' has no samples")
-    voice = _resample(voice, sr, CANONICAL_SR)
-    sr = CANONICAL_SR
-    voice = _sanitize(voice)
-    voice = _trim_silence(voice, sr)
-    voice = _dc_remove(voice)
-    voice = _highpass(voice, sr, 80.0)
-    voice = _compress(voice, 0.25, 3.0)
-    voice = _lowpass(voice, sr, 12000.0)
-
-    target = LOUDNESS_PRESETS.get(platform, LUFS_TARGET)
-    voice = _loudness_normalize(voice, sr, target)
-
-    voice = _voice_fade(voice, sr, fade_in_ms=5.0, fade_out_ms=25.0)
-    voice = _peak_limit(voice, PEAK_TARGET)
-
-    duration = len(voice) / float(sr)
-    _write_int16_wav(output_wav, sr, voice)
-    return duration
+def master_voice_only(input_wav: str, output_wav: str) -> float:
+    with wave.open(input_wav, "rb") as src:
+        frames = src.readframes(src.getnframes())
+        dtype = np.dtype(f"<i{src.getsampwidth()}")
+        signal = np.frombuffer(frames, dtype=dtype).astype(np.float64) / float(1 << (8 * src.getsampwidth() - 1))
+        sample_rate = src.getframerate()
+    signal = _sanitize(signal)
+    signal = _lowpass(signal, sample_rate, cutoff=12000.0)
+    signal = _peak_limit(signal)
+    signal = _voice_fade(signal, sample_rate)
+    _write_int16_wav(output_wav, sample_rate, signal)
+    return signal.size / float(sample_rate)
 
 
-def create_pad_wav(duration_sec: float, output_wav: str,
-                   sample_rate: int = CANONICAL_SR) -> None:
-    pad = generate_ambient_pad(duration_sec, sample_rate)
-    _write_int16_wav(output_wav, sample_rate, pad)
-
-
-def master_voice(input_wav: str, output_wav: str) -> None:
-    """DEPRECATED. Mixes voice+pad into one file. Use master_voice_only +
-    create_pad_wav instead; the pipeline now mixes via FFmpeg."""
-    warnings.warn(
-        "soundscape.master_voice is deprecated. "
-        "Use master_voice_only() + create_pad_wav() and mix with FFmpeg.",
-        DeprecationWarning, stacklevel=2,
-    )
-    sr, raw = wavfile.read(input_wav)
-    voice = _to_mono_float(raw, raw.dtype)
-    if voice.size == 0:
-        raise ValueError(f"'{input_wav}' has no samples")
-    voice = _resample(voice, sr, CANONICAL_SR)
-    sr = CANONICAL_SR
-    voice = _sanitize(voice)
-    voice = _dc_remove(voice)
-    voice = _highpass(voice, sr, 80.0)
-    voice = _compress(voice, 0.25, 3.0)
-    voice = _lowpass(voice, sr, 12000.0)
-    voice = _loudness_normalize(voice, sr, LUFS_TARGET)
-    voice = _voice_fade(voice, sr)
-    duration = len(voice) / float(sr)
-    pad = generate_ambient_pad(duration, sr)
-    L = min(len(voice), len(pad))
-    mixed = _peak_limit(voice[:L] + pad[:L], PEAK_TARGET)
-    _write_int16_wav(output_wav, sr, mixed)
+def create_pad_wav(
+    duration_sec: float,
+    output_wav: str,
+    sound_plan: dict,
+    sample_rate: int = CANONICAL_SR,
+) -> None:
+    signal = generate_ambient_pad(duration_sec, sound_plan, sample_rate)
+    _write_int16_wav(output_wav, sample_rate, signal)
