@@ -1,8 +1,8 @@
 import os
 import json
 import re
-# ✅ FIX: Sahi import statement
-import google.generativeai as genai
+# ✅ NAYI LIBRARY IMPORT (Purani nahi)
+from google import genai
 
 from request_pipeline import (
     UserRequest, 
@@ -17,11 +17,9 @@ class GeminiProvider:
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is missing.")
         
-        # ✅ FIX: transport='rest' add kiya gaya hai taaki 503 error na aaye
-        genai.configure(api_key=api_key, transport='rest')
-        
-        # Using gemini-1.5-flash for speed and high token limit to handle massive JSONs
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        # ✅ NAYA TARIKA (Client initialize karna)
+        self.client = genai.Client(api_key=api_key)
+        self.model_name = 'gemini-1.5-flash'
 
     def _parse_json(self, text):
         """Cleans markdown code blocks from Gemini's response and parses JSON."""
@@ -67,7 +65,11 @@ Required JSON Output Format:
   ]
 }}
 """
-        response = self.model.generate_content(prompt)
+        # ✅ NAYA API CALL
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt
+        )
         data = self._parse_json(response.text)
         
         calls = tuple(
@@ -141,7 +143,11 @@ Required JSON Output Format (Array of Artifacts):
   }}
 ]
 """
-        response = self.model.generate_content(prompt)
+        # ✅ NAYA API CALL
+        response = self.client.models.generate_content(
+            model=self.model_name,
+            contents=prompt
+        )
         data = self._parse_json(response.text)
         
         artifacts = []
