@@ -4,10 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - "request.txt"  # Triggers ONLY when you edit request.txt
+      - "request.txt"
       - ".github/workflows/render_shorts.yml"
       - "*.py"
-  workflow_dispatch:  # Allows you to click "Run workflow" manually
+      - "requirements.txt"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,7 +16,7 @@ permissions:
 jobs:
   build-and-render:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # Gives up to 2 hours for rendering
+    timeout-minutes: 120
 
     steps:
       - name: Checkout Repository
@@ -42,7 +43,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pypdf google-generativeai
+          pip install pypdf
 
       - name: Generate and Render Videos
         env:
@@ -51,21 +52,16 @@ jobs:
           SAEM_VOICE_REFERENCE: "saem_voice_sample.wav"
           HF_HOME: ${{ github.workspace }}/.hf_cache
         run: |
-          # Ensure output directory exists
           mkdir -p generated
           
-          # 1. Generate Plan using YOUR request.txt file
           python request_pipeline.py \
             --request "$(cat request.txt)" \
             --preferences '{"orientation":"horizontal", "language":"en", "quality":"1080p", "audio_direction":"calm, clear narration, no music", "visual_direction":"pure black background, color-coded vectors, morphing equations."}' \
             --output generated/physics.plan.json
           
-          # 2. Convert to CSV
           python output_pipeline.py generated/physics.plan.json \
             --csv-output generated/physics.csv
           
-          # 3. Render Videos
-          # Using --draft and espeak for fast, CPU-friendly rendering
           python batch_runner.py \
             --csv generated/physics.csv \
             --draft \
