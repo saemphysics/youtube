@@ -19,7 +19,7 @@ class GeminiProvider:
         
         # ✅ NAYA TARIKA (Client initialize karna)
         self.client = genai.Client(api_key=api_key)
-        self.model_name = 'gemini-1.5-flash'
+        self.model_name = 'gemini-flash-latest'
 
     def _parse_json(self, text):
         """Cleans markdown code blocks from Gemini's response and parses JSON."""
