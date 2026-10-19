@@ -251,12 +251,14 @@ def retrieve_book_passages(
         if not path.is_relative_to(ROOT):
             raise ValueError(f"source {source_id!r} resolves outside the repository")
 
-        for page_number, page_text in enumerate(_pdf_page_text(str(path)), start=1):
-            page_tokens = _tokens(page_text)
-            overlap = query_tokens & page_tokens
-            if not overlap:
-                continue
+        # 🛡️ FIX: Agar PDF kharab hai, toh error na de, bas skip kar de
+         try:
+            pdf_pages = _pdf_page_text(str(path))
+         except Exception as e:
+            print(f"Warning: Could not read PDF {path.name}. Error: {e}")
+            continue
 
+         for page_number, page_text in enumerate(pdf_pages, start=1):
             token_match = next(
                 (
                     token.start()
