@@ -1,7 +1,8 @@
 import os
 import json
 import re
-import genai
+# ✅ FIX: Sahi import statement
+import google.generativeai as genai
 
 from request_pipeline import (
     UserRequest, 
@@ -16,14 +17,15 @@ class GeminiProvider:
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is missing.")
         
+        # ✅ FIX: transport='rest' add kiya gaya hai taaki 503 error na aaye
         genai.configure(api_key=api_key, transport='rest')
+        
         # Using gemini-1.5-flash for speed and high token limit to handle massive JSONs
         self.model = genai.GenerativeModel('gemini-1.5-flash')
 
     def _parse_json(self, text):
         """Cleans markdown code blocks from Gemini's response and parses JSON."""
         text = text.strip()
-        # Remove ```json and ``` if they exist
         if text.startswith("```json"):
             text = text[7:]
         elif text.startswith("```"):
