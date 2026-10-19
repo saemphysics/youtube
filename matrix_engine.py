@@ -251,14 +251,7 @@ def retrieve_book_passages(
         if not path.is_relative_to(ROOT):
             raise ValueError(f"source {source_id!r} resolves outside the repository")
 
-        # 🛡️ FIX: Agar PDF kharab hai, toh error na de, bas skip kar de
-        try:
-            pdf_pages = _pdf_page_text(str(path))
-        except Exception as e:
-            print(f"Warning: Could not read PDF {path.name}. Error: {e}")
-            continue
-
-        for page_number, page_text in enumerate(pdf_pages, start=1):
+        for page_number, page_text in enumerate(_pdf_page_text(str(path)), start=1):
             page_tokens = _tokens(page_text)
             overlap = query_tokens & page_tokens
             if not overlap:
@@ -277,22 +270,20 @@ def retrieve_book_passages(
                 page_text[start:start + MAX_SOURCE_PASSAGE_CHARS].split()
             )
             score = len(overlap) / len(query_tokens)
-            matches.append(
-                (
-                    score,
-                    source_id,
-                    page_number,
-                    {
-                        "source_ref": source_id,
-                        "relative_path": source["relative_path"],
-                        "page_number": page_number,
-                        "relevance": score,
-                        "review_status": source["status"],
-                        "review_scope": source["review_scope"],
-                        "excerpt": excerpt,
-                    },
-                )
-            )
+            matches.append((
+                score,
+                source_id,
+                page_number,
+                {
+                    "source_ref": source_id,
+                    "relative_path": source["relative_path"],
+                    "page_number": page_number,
+                    "relevance": score,
+                    "review_status": source["status"],
+                    "review_scope": source["review_scope"],
+                    "excerpt": excerpt,
+                },
+            ))
 
     matches.sort(key=lambda match: (-match[0], match[1], match[2]))
     return tuple(match[3] for match in matches[:max_passages])
