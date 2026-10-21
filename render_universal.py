@@ -656,8 +656,8 @@ class SaemLabsBranding:
 
 
 # ============================================================ 2D scene
-class UniversalPhysicsScene(VoiceoverScene, MovingCameraScene):
-    def __init__(self, scene_kwargs=None, **kwargs):
+class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
+    def __init__(self, scene_kwargs=None, **kwargs)
         super().__init__(**kwargs)
         self.sk = scene_kwargs or {}
         self.eq_mobs = []
