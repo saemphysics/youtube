@@ -53,17 +53,33 @@ except ImportError:
     VoiceoverScene = Scene
     GTTSService = None
 
-try:
-    import networkx as nx
-    HAS_NX = True
-except ImportError:
-    HAS_NX = False
+ # ✅ NEW - Import only when needed
+HAS_NX = False
+HAS_STREAMLINES = False
 
-try:
+def _get_networkx():
+    global HAS_NX
+    if not HAS_NX:
+        try:
+            import networkx as nx
+            HAS_NX = True
+            return nx
+        except ImportError:
+            return None
+    import networkx as nx
+    return nx
+
+def _get_streamlines():
+    global HAS_STREAMLINES
+    if not HAS_STREAMLINES:
+        try:
+            from manim.mobject.vector_field import StreamLines
+            HAS_STREAMLINES = True
+            return StreamLines
+        except ImportError:
+            return None
     from manim.mobject.vector_field import StreamLines
-    HAS_STREAMLINES = True
-except ImportError:
-    HAS_STREAMLINES = False
+    return StreamLines
 
 # ============================================================ sound design
 try:
@@ -122,6 +138,11 @@ def apply_quality(preset: str, orientation: str | None = None):
 
 apply_quality("1080p", ORIENTATION)
 config.background_color = "#0B0C10"
+
+# Enable scene caching for faster re-renders
+config.cache_dir = "media/cache"
+config.disable_caching = False
+config.cache_flush = False
 
 
 def is_opengl() -> bool:
@@ -293,20 +314,18 @@ def pulse(scene, mob, scale=1.08, run_time=0.45):
 _PLACEHOLDER = "\x00\x01BS\x01\x00"
 
 
+ # ✅ NEW - Simpler fallback
 def safe_json_loads(val_str):
-    """Idempotent multi-layer tolerant JSON loader."""
     if not val_str or val_str.strip() in ('""', ""):
         return []
-    s = val_str
     try:
-        return json.loads(s)
+        return json.loads(val_str)
     except json.JSONDecodeError:
-        pass
-    s = s.replace("\\\\", _PLACEHOLDER)
-    s = s.replace("\\", "\\\\")
-    s = s.replace(_PLACEHOLDER, "\\\\")
-    return json.loads(s)
-
+        # Try removing escape characters
+        try:
+            return json.loads(val_str.replace("\\\\", "\\"))
+        except json.JSONDecodeError:
+            return []
 
 def to_3d(p):
     if p is None:
@@ -801,13 +820,20 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
             key = str(item.get("id") or f"elem_{idx}")
             self.visuals_by_id[key] = mob
         return group
-
+     
+  # ✅ NEW - Batch small groups, stagger large ones
     def _reveal_visuals(self, group):
-        """3b1b-style staggered reveal + subtle camera breathe."""
         if len(group) == 0:
             return
-        stagger_reveal(self, list(group),
-                       lag_ratio=0.10, run_time=1.6)
+        if len(group) <= 3:
+        # Small group: reveal all at once
+        self.play(*[FadeIn(m, shift=UP*0.2) for m in group], run_time=0.8)
+    else:
+        # Large group: stagger
+        stagger_reveal(self, list(group), lag_ratio=0.08, run_time=1.4)
+        if HAS_VISUAL_KIT:
+        visual_kit.ambient(self, list(group))
+     
         if HAS_VISUAL_KIT:
             visual_kit.ambient(self, list(group))
         self.director.zoom_to(config.frame_width * 0.92,
@@ -940,16 +966,22 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
         except Exception as e:
             _log(f"transition '{name}' failed: {e}")
 
+    _manifest_cache = {}
+
     def _load_manifest(self):
-        path = self.sk.get("manifest_path", "")
-        if not path or not os.path.exists(path):
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            _log(f"manifest load failed: {e}")
-            return None
+    path = self.sk.get("manifest_path", "")
+    if not path or not os.path.exists(path):
+        return None
+    if path in self._manifest_cache:
+        return self._manifest_cache[path]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self._manifest_cache[path] = data
+        return data
+    except Exception as e:
+        _log(f"manifest load failed: {e}")
+        return None
 
     def _distribute_durations(self, n_beats, manifest, main_target):
         if manifest and manifest.get("timeline"):
@@ -969,30 +1001,30 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
         return [per] * n_beats
 
     # -------------------------------------------------- beat dispatch
-    def _dispatch_beat(self, kind, focus, eq_card, duration,
-                        ease_name="soft", visual_group=None):
-        if kind == "hook":
-            self._beat_hook(focus, duration, ease_name,
-                            visual_group=visual_group)
-        elif kind == "promise":
-            self._beat_promise(focus, duration, ease_name,
-                                visual_group=visual_group)
-        elif kind == "law":
-            self._beat_law(eq_card, duration)
-        elif kind == "emphasis":
-            self._beat_emphasis(focus, duration, ease_name)
-        elif kind == "analogy":
-            self._beat_analogy(focus, duration, ease_name)
-        elif kind == "midpoint":
-            self._beat_midpoint(focus, duration, ease_name)
-        elif kind == "experiment":
-            self._beat_experiment(focus, duration, ease_name)
-        elif kind == "punchline":
-            self._beat_punchline(eq_card, duration)
-        elif kind == "cta":
-            self._beat_cta(duration)
+BEAT_DISPATCH = {
+    "hook": "_beat_hook",
+    "promise": "_beat_promise",
+    "law": "_beat_law",
+    "emphasis": "_beat_emphasis",
+    "analogy": "_beat_analogy",
+    "midpoint": "_beat_midpoint",
+    "experiment": "_beat_experiment",
+    "punchline": "_beat_punchline",
+    "cta": "_beat_cta",
+}
+
+    def _dispatch_beat(self, kind, focus, eq_card, duration, ease_name="soft", visual_group=None):
+        method_name = self.BEAT_DISPATCH.get(kind)
+        if method_name:
+        method = getattr(self, method_name)
+        if kind in ("hook", "promise", "analogy", "midpoint", "experiment"):
+            method(focus, duration, ease_name, visual_group=visual_group)
+        elif kind in ("law", "punchline"):
+            method(eq_card, duration)
         else:
-            live_wait(self, duration)
+            method(duration)
+    else:
+        live_wait(self, duration)
 
     def _beat_hook(self, focus, duration, ease_name="soft",
                     visual_group=None):
@@ -1494,8 +1526,8 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
             t = (gt.get_value() / period) * TAU + start_angle
             return center + np.array([a * np.cos(t), b * np.sin(t), 0.0])
 
-        body = always_redraw(lambda: Dot(_pos_fn(), radius=body_radius,
-                                          color=body_color))
+        body = Dot(radius=body_radius, color=body_color)
+        body.add_updater(lambda m: m.move_to(_pos_fn()))
         group = VGroup(ellipse, body)
         if trail:
             trail_path = TracedPath(
@@ -1532,9 +1564,8 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
             t = _angle()
             return np.array([radius * np.cos(t), radius * np.sin(t), 0.0])
 
-        vector = always_redraw(
-            lambda: Arrow(ORIGIN, _end(), buff=0,
-                          color=color, stroke_width=5))
+        vector = Dot(radius=body_radius, color=body_color)
+        vector.add_updater(lambda m: m.move_to(_pos_fn()))
         group = VGroup(circle, vector, origin_dot)
         if show_proj:
             def _proj_x():
@@ -1577,8 +1608,9 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
             t_raw = gt.get_value() / travel_time
             t = (t_raw % 1.0) if loop else min(1.0, t_raw)
             return s + t * (e - s)
-
-        photon = always_redraw(lambda: Dot(_pos(), radius=0.15, color=color))
+         
+        photon = Dot(radius=body_radius, color=body_color)
+        photon.add_updater(lambda m: m.move_to(_pos_fn()))
         group = VGroup(line, photon)
         if trail:
             trail_path = TracedPath(
@@ -1608,6 +1640,42 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
             dot = Dot(pos, radius=0.08, color=color)
             particles.append({"mob": dot, "pos": pos, "vel": vel})
         gt = self.global_time
+     
+    from manim import DotCloud
+
+    def _prim_particle_gas(self, item):
+       dims = item.get("container_dims", [10.0, 5.0])
+       num = int(item.get("num_particles", 20))
+       speed = float(item.get("speed", 1.2))
+       color = resolve_color(item)
+       w, h = float(dims[0]), float(dims[1])
+       half_w, half_h = w / 2.0 - 0.25, h / 2.0 - 0.25
+       container = Rectangle(width=w, height=h, color=COLOR["field"],
+                            stroke_width=2, fill_opacity=0.04)
+    
+    rng = np.random.default_rng(42)
+    positions = np.array([
+        [rng.uniform(-half_w, half_w), rng.uniform(-half_h, half_h), 0.0]
+        for _ in range(num)
+    ])
+    velocities = np.array([
+        [np.cos(rng.uniform(0, TAU)), np.sin(rng.uniform(0, TAU)), 0.0] * speed
+        for _ in range(num)
+    ])
+    
+    cloud = DotCloud(positions, color=color, radius=0.08)
+    gt = self.global_time
+    
+    def update_cloud(m):
+        t = gt.get_value()
+        new_positions = positions + velocities * t
+        # Triangle wave bounce
+        new_positions[:, 0] = _triangle_wave(new_positions[:, 0], -half_w, half_w)
+        new_positions[:, 1] = _triangle_wave(new_positions[:, 1], -half_h, half_h)
+        m.set_points(new_positions)
+    
+    cloud.add_updater(update_cloud)
+    return VGroup(container, cloud)
 
         def _make_updater(pdata, hw=half_w, hh=half_h):
             def upd(m):
@@ -1709,32 +1777,30 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
         )
         return VGroup(nl, marker)
 
+    _trajectory_cache = {}
+
     def _prim_pendulum(self, item):
         pivot = to_3d(item.get("pivot", [0, 2.5, 0]))
         length = float(item.get("length", 3.0))
         start_angle = float(item.get("angle", 30)) * DEGREES
-        period = float(item["period"]) if item.get("period") else None
         gravity = float(item.get("gravity", 9.81))
-        if period is not None:
-            if period <= 0:
-                raise ValueError("pendulum period must be positive")
-            gravity = 4 * PI**2 * length / period**2
         color = resolve_color(item)
         bob_r = float(item.get("bob_radius", 0.25))
         gt = self.global_time
-
         duration = max(0.0, float(self.sk.get("duration", 30.0)))
-
+    
+    # Cache key
+    cache_key = (length, start_angle, gravity, duration)
+    if cache_key not in self._trajectory_cache:
         def _derivative(_t, state):
             theta, angular_velocity = state
-            return np.array([
-                angular_velocity,
-                -(gravity / length) * np.sin(theta),
-            ])
-
-        times, states = integrate_rk4(
-            _derivative, [start_angle, 0.0], duration, 1 / 120,
-        )
+            return np.array([angular_velocity, -(gravity/length)*np.sin(theta)])
+        times, states = integrate_rk4(_derivative, [start_angle, 0.0], duration, 1/120)
+        self._trajectory_cache[cache_key] = (times, states)
+    
+    times, states = self._trajectory_cache[cache_key]
+    
+    # ... rest of the method
 
         def _bob_pos():
             t = float(np.clip(gt.get_value(), times[0], times[-1]))
@@ -1746,11 +1812,11 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
             return pivot + length * np.array([np.sin(theta),
                                               -np.cos(theta), 0.0])
         pivot_dot = Dot(pivot, radius=0.08, color=COLOR["white"])
-        rod = always_redraw(
-            lambda: Line(pivot, _bob_pos(),
-                         color=COLOR["muted"], stroke_width=3))
-        bob = always_redraw(lambda: Dot(_bob_pos(), radius=bob_r,
-                                          color=color))
+        rod = Dot(radius=body_radius, color=body_color)
+        rod.add_updater(lambda m: m.move_to(_pos_fn()))
+        bob = Dot(radius=body_radius, color=body_color)
+        bob.add_updater(lambda m: m.move_to(_pos_fn()))
+
         arc = Arc(radius=length,
                   start_angle=-PI / 2 - abs(start_angle),
                   angle=2 * abs(start_angle),
@@ -1781,12 +1847,11 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
                                      anchor[1] + dy * i, 0.0]))
             pts.append(b)
             return VMobject().set_points_as_corners(pts) \
-                .set_stroke(COLOR["muted"], width=2.5)
-        spring = always_redraw(_spring)
-        bob = always_redraw(
-            lambda: Circle(radius=0.25, color=color,
-                           fill_color=color, fill_opacity=0.85)
-                    .move_to(_bob_pos()))
+                .set_stroke(COLOR["muted"], width=2.5,
+        spring = Dot(radius=body_radius, color=body_color)
+        spring.add_updater(lambda m: m.move_to(_pos_fn()))
+        bob = Dot(radius=body_radius, color=body_color)
+        bob.add_updater(lambda m: m.move_to(_pos_fn()))
         return VGroup(spring, bob)
 
     # ============================================================ self-animated
@@ -1928,9 +1993,11 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
         return VGroup(q_mob, opts_vg)
 
     def _prim_concept_map(self, item):
-        if not HAS_NX:
-            _log("networkx not installed; skipping concept_map")
-            return None
+        nx = _get_networkx()
+        if nx is None:
+        _log("networkx not installed; skipping concept_map")
+        return None
+    # ... rest of method
         nodes = item.get("nodes", [])
         edges = item.get("edges", [])
         if not nodes:
@@ -3434,7 +3501,8 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
 
 
 # ============================================================ 3D scenes
-class Universal3DPhysicsScene(VoiceoverScene, ThreeDScene):
+class Universal3DPhysicsScene(ThreeDScene, VoiceoverScene):
+ 
     def __init__(self, scene_kwargs=None, **kwargs):
         super().__init__(**kwargs)
         self.sk = scene_kwargs or {}
@@ -3500,7 +3568,7 @@ class Universal3DPhysicsScene(VoiceoverScene, ThreeDScene):
             SaemLabsBranding.closing_card(self, duration=outro_dur)
 
 
-class SaemLabs3DScene(VoiceoverScene, ThreeDScene):
+class SaemLabs3DScene(ThreeDScene, VoiceoverScene):
     def __init__(self, scene_kwargs=None, **kwargs):
         super().__init__(**kwargs)
         self.sk = scene_kwargs or {}
