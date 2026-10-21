@@ -1,10 +1,27 @@
+# ==========================================================
+# SAEM PHYSICS VIDEO LIBRARY
+# Lines starting with # are ignored. 
+# Each line below generates one video.
+# ==========================================================
+
+# --- CALCULUS & ANALYSIS ---
 Explain the derivative of position as velocity using the calculus domain. Visual primitive: graph. Beat flow: hook -> analogy -> law -> punchline.
+Visualize the Fundamental Theorem of Calculus by showing how the area under a curve accumulates. Visual primitive: graph. Beat flow: hook -> analogy -> law -> punchline.
+
+# --- LINEAR ALGEBRA ---
 Visualize matrix transformations on basis vectors using the linear_algebra domain. Visual primitive: vector. Beat flow: hook -> analogy -> law -> punchline.
-Explain wave interference and phase alignment using the waves domain. Visual primitive: two_source_waves. Beat flow: hook -> analogy -> law -> punchline.
+Explain eigenvalues and eigenvectors as directions that survive a linear transformation. Visual primitive: vector. Beat flow: hook -> analogy -> law -> punchline.
+
+# --- MECHANICS & FLUIDS ---
+Solve projectile motion with an angle using the mechanics domain. Visual primitive: projectile_motion. Beat flow: hook -> experiment -> law -> midpoint -> punchline.
 Demonstrate fluid continuity in a narrow pipe using the fluids domain. Visual primitive: pipe_with_gauge. Beat flow: hook -> analogy -> law -> punchline.
-Explain vector field divergence and curl using the vector_calculus domain. Visual primitive: stream_field. Beat flow: hook -> analogy -> law -> punchline.
-Solve projectile motion with an angle using the mechanics domain and operation projectile_trajectory. Visual primitive: projectile_motion. Beat flow: hook -> experiment -> law -> midpoint -> punchline.
 Analyze a block on an inclined plane with friction using the mechanics domain. Visual primitive: vector. Beat flow: hook -> experiment -> law -> midpoint -> punchline.
-Calculate a two-block momentum collision using the mechanics domain. Visual primitive: particle. Beat flow: hook -> experiment -> law -> midpoint -> punchline.
-Derive the simple pendulum small angle approximation using the differential_equations domain. Visual primitive: pendulum. Beat flow: hook -> experiment -> law -> midpoint -> punchline.
+
+# --- ELECTRODYNAMICS & WAVES ---
 Simulate a charged particle in a magnetic field using the electrodynamics domain. Visual primitive: orbit. Beat flow: hook -> experiment -> law -> midpoint -> punchline.
+Explain wave interference and phase alignment using the waves domain. Visual primitive: two_source_waves. Beat flow: hook -> analogy -> law -> punchline.
+
+# --- ADVANCED & 3D CONCEPTS ---
+Visualize a black hole with a warped accretion disk. Visual primitive: accretion_disk. Beat flow: hook -> analogy -> law -> punchline.
+Show quantum tunneling of a wave packet through a potential barrier. Visual primitive: wave_packet_tunneling. Beat flow: hook -> analogy -> law -> punchline.
+Derive the simple pendulum small angle approximation. Visual primitive: pendulum. Beat flow: hook -> experiment -> law -> midpoint -> punchline.
