@@ -8,68 +8,182 @@ on:
       - ".github/workflows/render_shorts.yml"
       - "*.py"
       - "requirements.txt"
+      - "gemini_provider.py"
+      - "local_provider.py"
   workflow_dispatch:
+    inputs:
+      provider:
+        description: "AI provider for script generation"
+        type: choice
+        options: [gemini, local]
+        default: gemini
+      draft:
+        description: "Render in draft mode (faster, lower quality)"
+        type: boolean
+        default: true
+      require-approval:
+        description: "Pause for human approval before rendering"
+        type: boolean
+        default: false
+
+concurrency:
+  group: render-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
+# ─────────────────────────────────────────────────────────────────────────────
+# JOB 1: split request.txt into one plan per line
+# ─────────────────────────────────────────────────────────────────────────────
 jobs:
-  build-and-render:
+  prepare-matrix:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    outputs:
+      requests: ${{ steps.split.outputs.matrix }}
+      count:    ${{ steps.split.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: split
+        name: Split request.txt into matrix entries
+        run: |
+          python - <<'PY'
+          import json, os
+          lines = [ln.strip() for ln in open("request.txt", encoding="utf-8")
+                   if ln.strip() and not ln.lstrip().startswith("#")]
+          matrix = [{"index": i, "request": ln} for i, ln in enumerate(lines)]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+              f.write(f"count={len(matrix)}\n")
+          print(f"Prepared {len(matrix)} request(s) for parallel rendering.")
+          PY
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 2: generate one plan.json per request (LLM + engines, no rendering)
+  # ─────────────────────────────────────────────────────────────────────────────
+  generate-plan:
+    needs: prepare-matrix
+    if: ${{ needs.prepare-matrix.outputs.count != '0' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false                   # don't kill siblings if one request fails
+      matrix:
+        include: ${{ fromJson(needs.prepare-matrix.outputs.requests) }}
+    env:
+      SAEM_GENERATION_PROVIDER: ${{ (github.event.inputs.provider == 'local' || secrets.GEMINI_API_KEY == '') && 'local_provider:create_provider' || 'gemini_provider:create_provider' }}
+      GEMINI_API_KEY:           ${{ secrets.GEMINI_API_KEY }}
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: 'pip'
+          cache: "pip"
 
-      - name: Install System Dependencies (FFmpeg, LaTeX, Cairo, Pango, Audio)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg libcairo2-dev libpango1.0-dev \
-            texlive texlive-latex-extra texlive-fonts-extra \
-            texlive-latex-recommended texlive-science tipa espeak-ng
-
-      - name: Install PyTorch (CPU-only for rendering environment)
-        run: |
-          pip install torch==2.2.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu
-
-      - name: Install Python Dependencies
+      - name: Install generation-time Python deps only
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pypdf
 
-      - name: Generate and Render Videos
-        env:
-          SAEM_GENERATION_PROVIDER: "gemini_provider:create_provider"
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SAEM_VOICE_REFERENCE: "saem_voice_sample.wav"
-          HF_HOME: ${{ github.workspace }}/.hf_cache
+      - name: Fail-fast provider sanity check
+        run: |
+          python - <<PY
+          import importlib, os
+          spec = os.environ.get("SAEM_GENERATION_PROVIDER", "")
+          mod, _, fac = spec.partition(":")
+          ok = bool(mod) and bool(fac) and callable(getattr(importlib.import_module(mod), fac, None))
+          print(f"provider spec: {spec!r} -> {'OK' if ok else 'BROKEN'}")
+          raise SystemExit(0 if ok else 1)
+          PY
+
+      - name: Generate plan
         run: |
           mkdir -p generated
-          
           python request_pipeline.py \
-            --request "$(cat request.txt)" \
-            --preferences '{"orientation":"horizontal", "language":"en", "quality":"1080p", "audio_direction":"calm, clear narration, no music", "visual_direction":"pure black background, color-coded vectors, morphing equations."}' \
-            --output generated/physics.plan.json
-          
-          python output_pipeline.py generated/physics.plan.json \
-            --csv-output generated/physics.csv
-          
-          python batch_runner.py \
-            --csv generated/physics.csv \
-            --draft \
-            --voice-backend espeak
+            --request ${{ toJson(matrix.request) }} \
+            --preferences '{
+              "orientation":"horizontal",
+              "language":"en",
+              "quality":"1080p",
+              "audio_direction":"calm, clear narration, no music",
+              "visual_direction":"pure black background, color-coded vectors, morphing equations"
+            }' \
+            --output "generated/plan-${{ matrix.index }}.json"
 
-      - name: Upload Rendered Videos
-        uses: actions/upload-artifact@v4
+      - name: Dry-run validation (no render)
+        run: |
+          python output_pipeline.py "generated/plan-${{ matrix.index }}.json" \
+            --csv-output "generated/render-${{ matrix.index }}.csv" \
+            --dry-run
+
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: physics-videos
-          path: output_shorts/
-          retention-days: 5
+          name: plan-${{ matrix.index }}
+          path: generated/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JOB 3: render videos (Manim + TTS + FFmpeg) — optionally gated by teacher
+  # ─────────────────────────────────────────────────────────────────────────────
+  render:
+    needs: [prepare-matrix, generate-plan]
+    if: ${{ !cancelled() && needs.generate-plan.result == 'success' }}
+    environment: ${{ github.event.inputs.require-approval == 'true' && 'teacher-approval' || '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare-matrix.outputs.requests) }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Cache system packages
+        uses: awalsh128/cache-apt-pkgs-action@v1.4.3
+        with:
+          packages: ffmpeg libcairo2-dev libpango1.0-dev texlive texlive-latex-extra texlive-fonts-extra texlive-latex-recommended texlive-science tipa espeak-ng sox libsndfile1
+          version: 1.0
+
+      - name: Cache HuggingFace models (XTTS-v2 ~2 GB)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-xtts-v2-${{ runner.os }}
+          restore-keys: hf-xtts-v2-
+
+      - name: Install PyTorch (CPU) + Python deps
+        run: |
+          pip install torch==2.2.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download generated plan
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-${{ matrix.index }}
+          path: generated/
+
+      - name: Render + stitch video
+        run: |
+          python batch_runner.py \
+            --csv "generated/render-${{ matrix.index }}.csv" \
+            ${{ github.event.inputs.draft == 'true' && '--draft' || '' }} \
+            --voice-backend ${{ github.event.inputs.draft == 'true' && 'espeak' || 'coqui' }}
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: video-${{ matrix.index }}
+          path: |
+            output/
+            output_shorts/
+            generated/*.log
+          retention-days: 14
