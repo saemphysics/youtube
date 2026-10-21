@@ -1,11 +1,11 @@
-"""local_provider.py — deterministic offline provider (no LLM, no API key)."""
-
+"""local_provider.py — Deterministic offline provider (no LLM, no API key)."""
 
 class LocalProvider:
     def analyze(self, request, knowledge, engine_operations):
+        # Returns empty lists for concepts/sources to pass matrix validation checks
         return {
             "intent": f"Offline deterministic demonstration of: {request.text.strip()[:300]}",
-            "concept_ids": [],      # empty = passes all matrix validation
+            "concept_ids": [],      
             "source_refs": [],
             "engine_calls": [],
         }
@@ -47,5 +47,5 @@ class LocalProvider:
         }]
 
 
-def create_provider():   # column 0, exact name — this was your #33 crash
+def create_provider():   # column 0, exact name
     return LocalProvider()
