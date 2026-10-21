@@ -6,6 +6,31 @@ import re
 from google import genai
 from google.genai import types
 
+# ============================================================================
+# STRICT INSTRUCTION CONSTANTS
+# These ensure the LLM output perfectly matches request_pipeline.py validation
+# ============================================================================
+ANALYZE_INSTRUCTIONS = (
+    "Return ONE JSON object with exactly: "
+    '"intent" (non-empty sentence), '
+    '"concept_ids" (only IDs present in matched_concepts), '
+    '"source_refs" (only IDs present in source_notes), '
+    '"engine_calls" (list of {call_id, domain, operation, parameters} '
+    "with unique non-empty call_id and JSON-object parameters). Never return a list."
+)
+
+COMPOSE_INSTRUCTIONS = (
+    "Return a JSON list of artifact objects. Each MUST contain non-empty: "
+    "artifact_id, title, narration, language, quality, platform; "
+    'orientation exactly "horizontal" or "vertical"; '
+    'visuals: non-empty list of {"type": <primitive from the provided list>, ...}; '
+    'beats: non-empty list of {"type": one of hook/promise/analogy/law/emphasis/'
+    "experiment/midpoint/punchline, \"narration\": ...}; "
+    "equations: list of non-empty strings; bindings: list of objects; "
+    "audio: object with script/voice_reference/ambient/speed; "
+    "plus tagline, question, visual_direction."
+)
+
 
 def _extract_json(text: str):
     """Extract JSON from Gemini's response, handling markdown fences."""
@@ -46,13 +71,8 @@ class GeminiProvider:
     def analyze(self, request, knowledge, engine_operations):
         """Analyze the request and propose engine operations."""
         prompt = (
-            "You are the ANALYSIS stage of a physics video generation pipeline. "
-            "Your job is to interpret the request and propose verifiable operations. "
-            "Return ONE JSON object with exactly these keys: "
-            '"intent" (a non-empty sentence describing what the user wants), '
-            '"concept_ids" (empty array []), '
-            '"source_refs" (empty array []), '
-            '"engine_calls" (array of objects with {call_id, domain, operation, parameters}). '
+            f"You are the ANALYSIS stage of a physics video generation pipeline.\n"
+            f"{ANALYZE_INSTRUCTIONS}\n"
             f"Available engine operations: {json.dumps(engine_operations)}\n"
             f"Request: {request.text}\n"
             f"Knowledge context: {json.dumps(knowledge, default=str)[:2000]}"
@@ -66,11 +86,11 @@ class GeminiProvider:
         
         data = _extract_json(response.text)
         
-        # If model returned a list instead of dict, cache it and return empty analysis
+        # Fallback: If model returned a list instead of dict, cache it and return empty analysis
         if isinstance(data, list):
             self._pending_artifacts = data
             return {
-                "intent": f"Offline demonstration of: {request.text.strip()[:100]}",
+                "intent": f"Demonstration of: {request.text.strip()[:100]}",
                 "concept_ids": [],
                 "source_refs": [],
                 "engine_calls": [],
@@ -89,19 +109,8 @@ class GeminiProvider:
             return artifacts
         
         prompt = (
-            "You are the COMPOSE stage of a physics video generation pipeline. "
-            "Create a JSON list of video artifact objects. Each artifact MUST contain: "
-            '"artifact_id" (unique lowercase identifier), '
-            '"title" (non-empty), "tagline" (short description), '
-            '"question" (the educational question being answered), '
-            '"narration" (full script text), "language" ("en"), '
-            '"orientation" ("horizontal" or "vertical"), "quality" ("1080p"), '
-            '"platform" ("youtube"), "visual_direction" (description), '
-            '"equations" (array of LaTeX strings), '
-            '"visuals" (array of objects with "type" field from known primitives), '
-            '"beats" (array of objects with "type" from: hook, analogy, law, punchline, experiment, midpoint, promise, emphasis, cta, silent, annotate, shake), '
-            '"bindings" (array of objects), '
-            '"audio" (object with "script", "voice_reference", "ambient", "speed", "temperature").\n'
+            f"You are the COMPOSE stage of a physics video generation pipeline.\n"
+            f"{COMPOSE_INSTRUCTIONS}\n"
             f"Original request: {request.text}\n"
             f"Analysis: {json.dumps(analysis, default=str)}\n"
             f"Engine results: {json.dumps(engine_results, default=str)}"
@@ -115,7 +124,7 @@ class GeminiProvider:
         
         data = _extract_json(response.text)
         
-        # Handle nested structure
+        # Handle nested structure if the model wrapped the list in a dict
         if isinstance(data, dict):
             data = data.get("artifacts", [])
         
@@ -126,7 +135,7 @@ class GeminiProvider:
 
 
 # ============================================================================
-# CRITICAL: This function MUST be at column 0 (module level)
+# CRITICAL: This function MUST be at column 0 (no indentation)
 # The name MUST be exactly "create_provider"
 # ============================================================================
 def create_provider():
