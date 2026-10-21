@@ -4,26 +4,42 @@ on:
   push:
     branches: [main]
     paths:
-      - "request.txt"
       - ".github/workflows/render_shorts.yml"
       - "*.py"
       - "requirements.txt"
       - "gemini_provider.py"
       - "local_provider.py"
-      - "knowledge_matrix.csv"
-      - "book_sources.csv"
-      - "problem_matrix.csv"
   workflow_dispatch:
     inputs:
+      topic:
+        description: "Video Topic / Prompt"
+        required: true
+        type: string
+        default: "Explain the derivative of position as velocity using calculus."
       provider:
-        description: "AI provider for script generation"
+        description: "AI Provider"
         type: choice
-        options: [gemini, local]
-        default: gemini
-      draft:
-        description: "Render in draft mode (faster, 480p15)"
+        options: [local, gemini]
+        default: local
+      orientation:
+        description: "Video Format"
+        type: choice
+        options: [horizontal, vertical]
+        default: horizontal
+      quality:
+        description: "Render Quality"
+        type: choice
+        options: [draft, 720p, 1080p]
+        default: draft
+      voice_backend:
+        description: "Voice Engine"
+        type: choice
+        options: [espeak, coqui]
+        default: espeak
+      require_approval:
+        description: "Pause for human approval before rendering?"
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: render-${{ github.ref }}
@@ -31,135 +47,65 @@ concurrency:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 1: Split request.txt into matrix entries (Strict Filtering)
-  # ─────────────────────────────────────────────────────────────────────────────
-  prepare-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      requests: ${{ steps.split.outputs.matrix }}
-      count:    ${{ steps.split.outputs.count }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: split
-        name: Split request.txt (Smart Filter)
-        run: |
-          python - <<'PY'
-          import json, os, re
-          
-          # Read all non-empty, non-comment lines
-          lines = [ln.strip() for ln in open("request.txt", encoding="utf-8")
-                   if ln.strip() and not ln.lstrip().startswith("#")]
-                   
-          # Keywords that indicate an instruction/header, not a video topic
-          skip_keywords = [
-              "generate exactly", "concept videos", "problem videos", 
-              "critical renderer", "critical audio", "critical engine",
-              "do not generate", "use domain", "visual primitive", "beat flow"
-          ]
-          
-          matrix = []
-          idx = 0
-          for ln in lines:
-              # Skip instruction lines
-              if any(kw in ln.lower() for kw in skip_keywords):
-                  continue
-              # Strip leading numbers (e.g., "1. Derivative..." -> "Derivative...")
-              clean_ln = re.sub(r"^\d+\.\s*", "", ln).strip()
-              if clean_ln:
-                  matrix.append({"index": idx, "request": clean_ln})
-                  idx += 1
-                  
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"matrix={json.dumps(matrix)}\n")
-              f.write(f"count={len(matrix)}\n")
-          print(f"Prepared {len(matrix)} clean topic(s) for parallel rendering.")
-          PY
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 2: Phase 1 - The Brains (LLM + Math Engines)
+  # JOB 1: The Brains (LLM + Math Engines)
   # ─────────────────────────────────────────────────────────────────────────────
   generate-plan:
-    needs: prepare-matrix
-    if: ${{ needs.prepare-matrix.outputs.count != '0' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 3 # Prevents API rate limits and resource exhaustion
-      matrix:
-        include: ${{ fromJson(needs.prepare-matrix.outputs.requests) }}
+    environment: ${{ github.event.inputs.require_approval && 'teacher-approval' || '' }}
     env:
-      SAEM_GENERATION_PROVIDER: ${{ (github.event.inputs.provider == 'local' || secrets.GEMINI_API_KEY == '') && 'local_provider:create_provider' || 'gemini_provider:create_provider' }}
+      SAEM_GENERATION_PROVIDER: ${{ github.event.inputs.provider == 'gemini' && secrets.GEMINI_API_KEY != '' && 'gemini_provider:create_provider' || 'local_provider:create_provider' }}
       GEMINI_API_KEY:           ${{ secrets.GEMINI_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Plan-Generation Dependencies (Lightweight)
-        # CRITICAL FIX: We DO NOT install manim or TTS here. 
-        # request_pipeline.py only needs numpy/scipy for the math engines and pypdf for the matrix.
-        # This completely bypasses the manimpango/Cairo compilation crash.
+      - name: Install Plan-Generation Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install numpy==1.26.4 scipy==1.12.0 pypdf google-genai tqdm
 
-      - name: Fail-fast provider sanity check
-        run: |
-          python - <<PY
-          import importlib, os
-          spec = os.environ.get("SAEM_GENERATION_PROVIDER", "")
-          mod, _, fac = spec.partition(":")
-          ok = bool(mod) and bool(fac) and callable(getattr(importlib.import_module(mod), fac, None))
-          print(f"provider spec: {spec!r} -> {'OK' if ok else 'BROKEN'}")
-          raise SystemExit(0 if ok else 1)
-          PY
-
       - name: Generate Plan
         env:
-          REQUEST_TEXT: ${{ matrix.request }} # Passed via env to prevent Bash injection
+          REQUEST_TEXT: ${{ github.event.inputs.topic }}
         run: |
           mkdir -p generated
           python request_pipeline.py \
             --request "$REQUEST_TEXT" \
-            --preferences '{"orientation":"horizontal","language":"en","quality":"1080p","audio_direction":"calm, clear narration","visual_direction":"3b1b minimalist geometry"}' \
-            --output "generated/plan-${{ matrix.index }}.json"
+            --preferences '{
+              "orientation":"${{ github.event.inputs.orientation }}",
+              "language":"en",
+              "quality":"${{ github.event.inputs.quality == 'draft' && '720p' || github.event.inputs.quality }}",
+              "audio_direction":"calm, clear narration",
+              "visual_direction":"3b1b minimalist geometry"
+            }' \
+            --output "generated/plan.json"
 
-      - name: Dry-run Validation (Adapter CSV generation)
+      - name: Validate & Convert to CSV
         run: |
-          python output_pipeline.py "generated/plan-${{ matrix.index }}.json" \
-            --csv-output "generated/render-${{ matrix.index }}.csv" \
+          python output_pipeline.py "generated/plan.json" \
+            --csv-output "generated/render.csv" \
             --dry-run
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: plan-${{ matrix.index }}
+          name: plan-artifacts
           path: generated/
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 3: Phase 2 - The Muscle (Manim + TTS + FFmpeg)
+  # JOB 2: The Muscle (Manim + TTS + FFmpeg)
   # ─────────────────────────────────────────────────────────────────────────────
   render:
-    needs: [prepare-matrix, generate-plan]
+    needs: generate-plan
     if: ${{ !cancelled() && needs.generate-plan.result == 'success' }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 2 # Rendering is CPU/RAM intensive (XTTS needs ~4GB RAM)
-      matrix:
-        include: ${{ fromJson(needs.prepare-matrix.outputs.requests) }}
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install System Dependencies (Required for Manim & TTS)
-        # manimpango needs libcairo2-dev and libpango1.0-dev to compile.
-        # Manim needs texlive for LaTeX equations. Coqui TTS needs sox/libsndfile1.
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -173,49 +119,35 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Cache HuggingFace Models (XTTS-v2 ~2 GB)
+      - name: Cache HuggingFace Models (XTTS-v2)
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
           key: hf-xtts-v2-${{ runner.os }}
           restore-keys: hf-xtts-v2-
 
-      - name: Install PyTorch (CPU) + Full Python Requirements
+      - name: Install PyTorch (CPU) + Full Requirements
         run: |
           pip install torch==2.2.2 torchaudio==2.2.2 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Download Generated Plan & CSV
+      - name: Download Generated Plan
         uses: actions/download-artifact@v4
         with:
-          name: plan-${{ matrix.index }}
+          name: plan-artifacts
           path: generated/
-
-      - name: Verify Voice Reference File (Coqui TTS Fallback)
-        # generate_audio.py requires a reference WAV for Coqui.
-        # If it's missing in the repo, we safely fall back to espeak-ng.
-        run: |
-          if [ ! -f "saem_voice_sample.wav" ]; then
-            echo "::warning::saem_voice_sample.wav not found! Falling back to espeak-ng."
-            echo "VOICE_BACKEND=espeak" >> $GITHUB_ENV
-          else
-            echo "VOICE_BACKEND=coqui" >> $GITHUB_ENV
-          fi
 
       - name: Render + Stitch Video
         run: |
           mkdir -p output_shorts temp_audio
           python batch_runner.py \
-            --csv "generated/render-${{ matrix.index }}.csv" \
-            ${{ github.event.inputs.draft == 'true' && '--draft' || '' }} \
-            --voice-backend ${{ env.VOICE_BACKEND }}
+            --csv "generated/render.csv" \
+            ${{ github.event.inputs.quality == 'draft' && '--draft' || '' }} \
+            --voice-backend ${{ github.event.inputs.voice_backend }}
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: video-${{ matrix.index }}
-          path: |
-            output_shorts/
-            generated/*.log
+          name: final-video
+          path: output_shorts/
           retention-days: 14
