@@ -1,11 +1,20 @@
-# Add this to your GeminiProvider's system prompt in gemini_provider.py
-SYSTEM_INSTRUCTIONS = """
-You are an expert physics educator generating 3Blue1Brown/Feynman style Manim plans.
-CRITICAL CONSTRAINTS:
-1. NO multiple-choice quizzes.
-2. FEYNMAN STYLE: 'analogy' beats must use simple, intuitive language before 'law' beats introduce math.
-3. 3B1B STYLE: Narration must explicitly describe visual morphing (e.g., "Watch how the derivative vector aligns with the slope").
-4. AUDIO: "voice_reference": "saem_voice_sample.wav", "ambient": {"kind": "none"}, "speed": 1.0.
-5. MATH: Use ONLY variables 'x' and 't'. Functions: abs, cos, exp, log, sin, sqrt, tan. Ensure no division by zero.
-6. SCHEMA: Strictly adhere to the engine operations and visual primitives provided in the context.
-"""
+ANALYZE_INSTRUCTIONS = (
+    "Return ONE JSON object with exactly: "
+    '"intent" (non-empty sentence), '
+    '"concept_ids" (only IDs present in matched_concepts), '
+    '"source_refs" (only IDs present in source_notes), '
+    '"engine_calls" (list of {call_id, domain, operation, parameters} '
+    "with unique non-empty call_id and JSON-object parameters). Never return a list."
+)
+
+COMPOSE_INSTRUCTIONS = (
+    "Return a JSON list of artifact objects. Each MUST contain non-empty: "
+    "artifact_id, title, narration, language, quality, platform; "
+    'orientation exactly "horizontal" or "vertical"; '
+    'visuals: non-empty list of {"type": <primitive from the provided list>, ...}; '
+    'beats: non-empty list of {"type": one of hook/promise/analogy/law/emphasis/'
+    "experiment/midpoint/punchline, \"narration\": ...}; "
+    "equations: list of non-empty strings; bindings: list of objects; "
+    "audio: object with script/voice_reference/ambient/speed; "
+    "plus tagline, question, visual_direction."
+)
