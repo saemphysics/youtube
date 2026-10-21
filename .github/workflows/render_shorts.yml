@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # JOB 1: Split request.txt into matrix entries
+  # JOB 1: Split request.txt into matrix entries (WITH INTELLIGENT FILTERING)
   # ─────────────────────────────────────────────────────────────────────────────
   prepare-matrix:
     runs-on: ubuntu-latest
@@ -42,17 +42,36 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: split
-        name: Split request.txt (Filtering out comments and blank lines)
+        name: Split request.txt (Intelligent filtering)
         run: |
           python - <<'PY'
           import json, os
-          lines = [ln.strip() for ln in open("request.txt", encoding="utf-8")
-                   if ln.strip() and not ln.lstrip().startswith("#")]
-          matrix = [{"index": i, "request": ln} for i, ln in enumerate(lines)]
+
+          with open("request.txt", encoding="utf-8") as f:
+              lines = f.readlines()
+          
+          valid_requests = []
+          for ln in lines:
+              ln = ln.strip()
+              # 1. Skip empty lines and comments
+              if not ln or ln.lstrip().startswith("#"):
+                  continue
+              # 2. Skip known mega-prompt headers/instructions
+              skip_phrases = ("generate exactly", "5 concept", "5 problem", "critical renderer", "critical audio", "critical engine", "do not")
+              if any(ln.lower().startswith(p) for p in skip_phrases):
+                  continue
+              # 3. Only accept lines that look like actual video topics
+              if any(kw in ln.lower() for kw in ["explain", "visualize", "derive", "use domain", "show how", "simulate", "analyze", "solve", "demonstrate"]):
+                  valid_requests.append(ln)
+          
+          # 4. HARD CAP: Never process more than 10 requests to prevent CI runaway
+          valid_requests = valid_requests[:10]
+          
+          matrix = [{"index": i, "request": ln} for i, ln in enumerate(valid_requests)]
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"matrix={json.dumps(matrix)}\n")
               f.write(f"count={len(matrix)}\n")
-          print(f"Prepared {len(matrix)} request(s) for parallel rendering.")
+          print(f"✅ Prepared {len(matrix)} valid request(s) for parallel rendering.")
           PY
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -79,9 +98,6 @@ jobs:
           python-version: "3.11"
 
       - name: Install Plan-Generation Dependencies (Lightweight)
-        # CRITICAL FIX: We DO NOT install manim or TTS here. 
-        # request_pipeline.py only needs numpy/scipy for the math engines and pypdf for the matrix.
-        # This completely bypasses the manimpango/Cairo compilation crash.
         run: |
           python -m pip install --upgrade pip
           pip install numpy==1.26.4 scipy==1.12.0 pypdf google-genai tqdm
@@ -99,7 +115,7 @@ jobs:
 
       - name: Generate Plan
         env:
-          REQUEST_TEXT: ${{ matrix.request }} # Passed via env to prevent Bash injection
+          REQUEST_TEXT: ${{ matrix.request }}
         run: |
           mkdir -p generated
           python request_pipeline.py \
@@ -137,8 +153,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install System Dependencies (Required for Manim & TTS)
-        # manimpango needs libcairo2-dev and libpango1.0-dev to compile.
-        # Manim needs texlive for LaTeX equations. Coqui TTS needs sox/libsndfile1.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -172,8 +186,6 @@ jobs:
           path: generated/
 
       - name: Verify Voice Reference File (Coqui TTS Fallback)
-        # generate_audio.py requires a reference WAV for Coqui.
-        # If it's missing in the repo, we safely fall back to espeak-ng.
         run: |
           if [ ! -f "saem_voice_sample.wav" ]; then
             echo "::warning::saem_voice_sample.wav not found! Falling back to espeak-ng."
