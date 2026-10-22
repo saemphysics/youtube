@@ -827,12 +827,12 @@ class UniversalPhysicsScene(MovingCameraScene, VoiceoverScene):
             return
         if len(group) <= 3:
         # Small group: reveal all at once
-        self.play(*[FadeIn(m, shift=UP*0.2) for m in group], run_time=0.8)
-    else:
+             self.play(*[FadeIn(m, shift=UP*0.2) for m in group], run_time=0.8)
+        else:
         # Large group: stagger
         stagger_reveal(self, list(group), lag_ratio=0.08, run_time=1.4)
         if HAS_VISUAL_KIT:
-        visual_kit.ambient(self, list(group))
+            visual_kit.ambient(self, list(group))
      
         if HAS_VISUAL_KIT:
             visual_kit.ambient(self, list(group))
